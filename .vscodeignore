@@ -1,0 +1,17 @@
+.vscode/**
+.vscode-test/**
+src/**
+out/**
+node_modules/**
+.gitignore
+.gitattributes
+*.map
+*.ts
+!dist/**
+tsconfig.json
+webpack.config.js
+eslint.config.mjs
+.vscode-test.mjs
+vsc-extension-quickstart.md
+CHANGELOG.md
+resources/icon-ext.svg

@@ -1,0 +1,344 @@
+{
+  "name": "vscode-acp",
+  "displayName": "ACP Client",
+  "description": "Agent Client Protocol client for VS Code — connect to any ACP-compatible AI coding agent",
+  "version": "0.1.0",
+  "publisher": "acp",
+  "license": "MIT",
+  "icon": "resources/icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "keywords": [
+    "acp",
+    "agent",
+    "ai",
+    "coding agent",
+    "copilot",
+    "claude",
+    "gemini"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "acp-client",
+          "title": "ACP Client",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "acp-client": [
+        {
+          "id": "acp-sessions",
+          "name": "Agents",
+          "type": "tree"
+        },
+        {
+          "id": "acp-chat",
+          "name": "Chat",
+          "type": "webview"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "acp-sessions",
+        "contents": "No agents configured.\n[Add Agent](command:acp.addAgent)\nConfigure agents in settings or browse the [Agent Registry](command:acp.browseRegistry)."
+      },
+      {
+        "view": "acp-chat",
+        "contents": "Start chatting with an AI coding agent.\n[Connect to Agent](command:acp.connectAgent)\nSelect an agent from the list above to begin."
+      }
+    ],
+    "commands": [
+      {
+        "command": "acp.connectAgent",
+        "title": "ACP: Connect to Agent",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "acp.newConversation",
+        "title": "ACP: New Conversation",
+        "icon": "$(add)"
+      },
+      {
+        "command": "acp.sendPrompt",
+        "title": "ACP: Send Prompt"
+      },
+      {
+        "command": "acp.cancelTurn",
+        "title": "ACP: Cancel Current Turn",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "acp.disconnectAgent",
+        "title": "ACP: Disconnect Agent",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "acp.openChat",
+        "title": "ACP: Open Chat Panel"
+      },
+      {
+        "command": "acp.addAgent",
+        "title": "ACP: Add Agent Configuration",
+        "icon": "$(add)"
+      },
+      {
+        "command": "acp.removeAgent",
+        "title": "ACP: Remove Agent"
+      },
+      {
+        "command": "acp.showLog",
+        "title": "ACP: Show Log"
+      },
+      {
+        "command": "acp.showTraffic",
+        "title": "ACP: Show Protocol Traffic"
+      },
+      {
+        "command": "acp.browseRegistry",
+        "title": "ACP: Browse Agent Registry"
+      },
+      {
+        "command": "acp.setMode",
+        "title": "ACP: Set Agent Mode"
+      },
+      {
+        "command": "acp.setModel",
+        "title": "ACP: Set Agent Model"
+      },
+      {
+        "command": "acp.attachFile",
+        "title": "ACP: Attach File to Prompt",
+        "icon": "$(attach)"
+      },
+      {
+        "command": "acp.refreshAgents",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "acp.restartAgent",
+        "title": "ACP: Restart Agent",
+        "icon": "$(debug-restart)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "acp.addAgent",
+          "when": "view == acp-sessions",
+          "group": "navigation@1"
+        },
+        {
+          "command": "acp.refreshAgents",
+          "when": "view == acp-sessions",
+          "group": "navigation@2"
+        },
+        {
+          "command": "acp.browseRegistry",
+          "when": "view == acp-sessions"
+        },
+        {
+          "command": "acp.newConversation",
+          "when": "view == acp-chat",
+          "group": "navigation@1"
+        },
+        {
+          "command": "acp.attachFile",
+          "when": "view == acp-chat",
+          "group": "navigation@2"
+        },
+        {
+          "command": "acp.cancelTurn",
+          "when": "view == acp-chat && acp.turnInProgress",
+          "group": "navigation@3"
+        },
+        {
+          "command": "acp.disconnectAgent",
+          "when": "view == acp-chat",
+          "group": "navigation@4"
+        },
+        {
+          "command": "acp.showLog",
+          "when": "view == acp-chat"
+        },
+        {
+          "command": "acp.showTraffic",
+          "when": "view == acp-chat"
+        },
+        {
+          "command": "acp.restartAgent",
+          "when": "view == acp-chat"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "acp.connectAgent",
+          "when": "view == acp-sessions && viewItem == agent-disconnected",
+          "group": "inline"
+        },
+        {
+          "command": "acp.disconnectAgent",
+          "when": "view == acp-sessions && viewItem == agent-connected",
+          "group": "inline"
+        },
+        {
+          "command": "acp.removeAgent",
+          "when": "view == acp-sessions && viewItem =~ /^agent/"
+        },
+        {
+          "command": "acp.restartAgent",
+          "when": "view == acp-sessions && viewItem == agent-connected"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "acp.openChat",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a"
+      },
+      {
+        "command": "acp.cancelTurn",
+        "key": "escape",
+        "when": "acp.turnInProgress"
+      }
+    ],
+    "configuration": {
+      "title": "ACP Client",
+      "properties": {
+        "acp.agents": {
+          "type": "object",
+          "description": "Agent configurations. Each key is the agent name, value has command, args, and env.",
+          "default": {
+            "GitHub Copilot": {
+              "command": "npx",
+              "args": [
+                "@github/copilot-language-server@latest",
+                "--acp"
+              ],
+              "env": {}
+            },
+            "Claude Code": {
+              "command": "npx",
+              "args": [
+                "@zed-industries/claude-code-acp@latest"
+              ],
+              "env": {}
+            },
+            "Gemini CLI": {
+              "command": "npx",
+              "args": [
+                "@google/gemini-cli@latest",
+                "--experimental-acp"
+              ],
+              "env": {}
+            },
+            "Qwen Code": {
+              "command": "npx",
+              "args": [
+                "@qwen-code/qwen-code@latest",
+                "--acp",
+                "--experimental-skills"
+              ],
+              "env": {}
+            },
+            "Auggie CLI": {
+              "command": "npx",
+              "args": [
+                "@augmentcode/auggie@latest",
+                "--acp"
+              ],
+              "env": {
+                "AUGMENT_DISABLE_AUTO_UPDATE": "1"
+              }
+            },
+            "Qoder CLI": {
+              "command": "npx",
+              "args": [
+                "@qoder-ai/qodercli@latest",
+                "--acp"
+              ],
+              "env": {}
+            },
+            "Codex CLI": {
+              "command": "npx",
+              "args": [
+                "@zed-industries/codex-acp@latest"
+              ],
+              "env": {}
+            },
+            "OpenCode": {
+              "command": "npx",
+              "args": [
+                "opencode-ai@latest",
+                "acp"
+              ],
+              "env": {}
+            }
+          }
+        },
+        "acp.autoApprovePermissions": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "allowRead",
+            "allowAll"
+          ],
+          "default": "ask",
+          "description": "Automatically approve agent permission requests. 'ask' always prompts, 'allowRead' auto-approves read operations, 'allowAll' approves everything."
+        },
+        "acp.defaultWorkingDirectory": {
+          "type": "string",
+          "default": "",
+          "description": "Default working directory for agent sessions. Leave empty to use the current workspace folder."
+        },
+        "acp.logTraffic": {
+          "type": "boolean",
+          "default": true,
+          "description": "Log all ACP protocol traffic to the output channel."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "lint": "eslint src",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "test": "vscode-test"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^0.14.1",
+    "marked": "^15.0.0"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.1",
+    "eslint": "^9.0.0",
+    "ts-loader": "^9.5.0",
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.0.0",
+    "webpack": "^5.95.0",
+    "webpack-cli": "^5.1.0"
+  }
+}

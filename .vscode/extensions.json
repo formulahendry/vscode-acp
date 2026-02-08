@@ -1,0 +1,8 @@
+{
+	// See https://go.microsoft.com/fwlink/?LinkId=827846 to learn about workspace recommendations.
+	"recommendations": [
+		"amodio.tsl-problem-matcher",
+		"ms-vscode.extension-test-runner",
+		"dbaeumer.vscode-eslint"
+	]
+}
