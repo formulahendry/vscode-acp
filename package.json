@@ -1,11 +1,20 @@
 {
   "name": "vscode-acp",
   "displayName": "ACP Client",
-  "description": "Agent Client Protocol client for VS Code — connect to any ACP-compatible AI coding agent",
+  "description": "Agent Client Protocol client for VS Code — connect to GitHub Copilot, Claude Code, Gemini CLI, Qwen Code, Codex CLI, OpenCode, and any ACP-compatible AI coding agent",
   "version": "0.1.0",
-  "publisher": "acp",
+  "publisher": "formulahendry",
   "license": "MIT",
   "icon": "resources/icon.png",
+  "bugs": {
+    "url": "https://github.com/formulahendry/vscode-acp/issues",
+    "email": "formulahendry@gmail.com"
+  },
+  "homepage": "https://github.com/formulahendry/vscode-acp/blob/main/README.md",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/formulahendry/vscode-acp.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -18,9 +27,7 @@
     "agent",
     "ai",
     "coding agent",
-    "copilot",
-    "claude",
-    "gemini"
+    "copilot"
   ],
   "activationEvents": [],
   "main": "./dist/extension.js",

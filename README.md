@@ -2,6 +2,8 @@
 
 A Visual Studio Code extension that provides a client for the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) — connect to any ACP-compatible AI coding agent directly from your editor.
 
+![ACP Client Screenshot](resources/screenshot.png)
+
 ## Features
 
 - **Multi-Agent Support**: Connect to 8 pre-configured ACP agents or add your own
@@ -32,18 +34,18 @@ A Visual Studio Code extension that provides a client for the [Agent Client Prot
 
 The extension comes with default configurations for:
 
-| Agent | Package |
+| Agent | Command |
 |-------|---------|
-| GitHub Copilot | `@github/copilot-language-server@latest --acp` |
-| Claude Code | `@zed-industries/claude-code-acp@latest` |
-| Gemini CLI | `@google/gemini-cli@latest --experimental-acp` |
-| Qwen Code | `@qwen-code/qwen-code@latest --acp --experimental-skills` |
-| Auggie CLI | `@augmentcode/auggie@latest --acp` |
-| Qoder CLI | `@qoder-ai/qodercli@latest --acp` |
-| Codex CLI | `@zed-industries/codex-acp@latest` |
-| OpenCode | `opencode-ai@latest acp` |
+| GitHub Copilot | `npx @github/copilot-language-server@latest --acp` |
+| Claude Code | `npx @zed-industries/claude-code-acp@latest` |
+| Gemini CLI | `npx @google/gemini-cli@latest --experimental-acp` |
+| Qwen Code | `npx @qwen-code/qwen-code@latest --acp --experimental-skills` |
+| Auggie CLI | `npx @augmentcode/auggie@latest --acp` |
+| Qoder CLI | `npx @qoder-ai/qodercli@latest --acp` |
+| Codex CLI | `npx @zed-industries/codex-acp@latest` |
+| OpenCode | `npx opencode-ai@latest acp` |
 
-All agents are launched via `npx`. You can add custom agent configurations in settings.
+You can add custom agent configurations in settings.
 
 ## Extension Settings
 
