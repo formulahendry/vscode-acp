@@ -1,6 +1,6 @@
 # ACP Client for VS Code
 
-A Visual Studio Code extension that provides a client for the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) — connect to any ACP-compatible AI coding agent directly from your editor.
+A [Visual Studio Code extension](https://marketplace.visualstudio.com/items?itemName=formulahendry.acp-client) that provides a client for the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) — connect to any ACP-compatible AI coding agent directly from your editor.
 
 ![ACP Client Screenshot](resources/screenshot.png)
 
@@ -19,7 +19,7 @@ A Visual Studio Code extension that provides a client for the [Agent Client Prot
 
 ## Quick Start
 
-1. Install the extension
+1. Install: [Visual Studio Code Marketplace](https://marketplace.visualstudio.com/items?itemName=formulahendry.acp-client) | [Open in VS Code](vscode:extension/formulahendry.acp-client)
 2. Open the ACP Client panel from the Activity Bar (ACP icon)
 3. Click **+** to add an agent configuration, or use the defaults
 4. Click an agent to connect
@@ -139,6 +139,12 @@ Communication with agents uses the ACP protocol (JSON-RPC 2.0 over stdio).
 - Agents must be available via the system PATH or `npx`
 - Some agents may require additional authentication setup
 - File attachment feature is not yet functional
+
+## Links
+
+- [ACP Client on Visual Studio Code Marketplace](https://marketplace.visualstudio.com/items?itemName=formulahendry.acp-client)
+- [Agent Client Protocol](https://agentclientprotocol.com/)
+- [GitHub Repository](https://github.com/nicepkg/vscode-acp)
 
 ## License
 
