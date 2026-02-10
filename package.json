@@ -331,6 +331,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.14.1",
+    "@vscode/extension-telemetry": "^1.5.0",
     "marked": "^15.0.0"
   },
   "devDependencies": {

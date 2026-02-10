@@ -2,6 +2,7 @@ import { spawn, ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { log, logError } from '../utils/Logger';
+import { sendEvent, sendError } from '../utils/TelemetryManager';
 import type { AgentConfigEntry } from '../config/AgentConfig';
 
 /**
@@ -96,7 +97,7 @@ export class AgentManager extends EventEmitter {
       const shellArgs = useLoginFlag ? ['-l', '-c', commandStr] : ['-c', commandStr];
 
       log(`Using shell: ${shell} ${shellArgs.join(' ')}`);
-
+      sendEvent('agent/spawn/shell', { shell, useLoginFlag: String(useLoginFlag) });
       return spawn(shell, shellArgs, {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...process.env, ...(config.env || {}) },
@@ -117,6 +118,7 @@ export class AgentManager extends EventEmitter {
 
     child.on('error', (err) => {
       logError(`Agent "${name}" process error`, err);
+      sendError('agent/error', { agentName: name, errorType: err.message });
       this.emit('agent-error', { agentId: id, error: err });
     });
 

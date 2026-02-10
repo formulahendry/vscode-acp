@@ -10,9 +10,14 @@ import { ChatWebviewProvider } from './ui/ChatWebviewProvider';
 import { getAgentNames, getAgentConfigs } from './config/AgentConfig';
 import { fetchRegistry } from './config/RegistryClient';
 import { log, logError, disposeChannels } from './utils/Logger';
+import { initTelemetry, sendEvent } from './utils/TelemetryManager';
 
 export function activate(context: vscode.ExtensionContext): void {
   log('ACP Client extension activating...');
+
+  // --- Telemetry ---
+  const telemetryReporter = initTelemetry();
+  context.subscriptions.push(telemetryReporter);
 
   // --- Core services ---
   const sessionUpdateHandler = new SessionUpdateHandler();
@@ -309,6 +314,7 @@ export function activate(context: vscode.ExtensionContext): void {
     await config.update('agents', agents, vscode.ConfigurationTarget.Global);
     sessionTreeProvider.refresh();
     vscode.window.showInformationMessage(`Agent "${name}" added.`);
+    sendEvent('agent/added');
   });
 
   // Remove Agent
@@ -341,6 +347,7 @@ export function activate(context: vscode.ExtensionContext): void {
     await config.update('agents', agents, vscode.ConfigurationTarget.Global);
     sessionTreeProvider.refresh();
     vscode.window.showInformationMessage(`Agent "${name}" removed.`);
+    sendEvent('agent/removed', { agentName: name });
   });
 
   // Attach File
@@ -357,6 +364,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Browse Registry
   const browseRegistryCmd = vscode.commands.registerCommand('acp.browseRegistry', async () => {
+    sendEvent('registry/browse');
     try {
       const agents = await fetchRegistry();
       const items = agents.map(a => ({
@@ -410,6 +418,7 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   );
 
+  sendEvent('extension/activated', { version: vscode.extensions.getExtension('formulahendry.acp-client')?.packageJSON?.version ?? 'unknown' });
   log('ACP Client extension activated.');
 }
 

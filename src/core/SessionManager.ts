@@ -9,6 +9,7 @@ import { ConnectionManager, ConnectionInfo } from './ConnectionManager';
 import { SessionUpdateHandler } from '../handlers/SessionUpdateHandler';
 import { AgentConfigEntry, getAgentConfigs } from '../config/AgentConfig';
 import { log, logError } from '../utils/Logger';
+import { sendEvent, sendError } from '../utils/TelemetryManager';
 
 export interface SessionInfo {
   sessionId: string;
@@ -72,63 +73,71 @@ export class SessionManager extends EventEmitter {
     }
 
     log(`SessionManager: connecting to agent "${agentName}"`);
+    sendEvent('agent/connect.start', { agentName });
+    const connectStartTime = Date.now();
 
-    // Spawn the agent process
-    const agentInstance = this.agentManager.spawnAgent(agentName, config);
-    const agentId = agentInstance.id;
-
-    // Listen for agent errors/close
-    this.agentManager.on('agent-error', (evt: { agentId: string; error: Error }) => {
-      if (evt.agentId === agentId) {
-        logError(`Agent ${agentName} error`, evt.error);
-        this.emit('agent-error', agentId, evt.error);
-      }
-    });
-
-    this.agentManager.on('agent-closed', (evt: { agentId: string; code: number | null }) => {
-      if (evt.agentId === agentId) {
-        log(`Agent ${agentName} closed with code ${evt.code}`);
-        // Clean up the session for this agent
-        const sessionId = this.agentSessions.get(agentName);
-        if (sessionId) {
-          this.sessions.delete(sessionId);
-          this.agentSessions.delete(agentName);
-          if (this.activeSessionId === sessionId) {
-            this.activeSessionId = null;
-          }
-          this.emit('agent-disconnected', agentName);
-          this.emit('active-session-changed', null);
-        }
-        this.emit('agent-closed', agentId, evt.code);
-      }
-    });
-
-    // Connect and initialize
-    const agentProcess = this.agentManager.getAgent(agentId);
-    if (!agentProcess) {
-      throw new Error('Agent process not found after spawn');
-    }
-
-    let connInfo: ConnectionInfo;
     try {
-      connInfo = await this.connectionManager.connect(agentId, agentProcess.process);
-    } catch (e) {
-      this.agentManager.killAgent(agentId);
+      // Spawn the agent process
+      const agentInstance = this.agentManager.spawnAgent(agentName, config);
+      const agentId = agentInstance.id;
+
+      // Listen for agent errors/close
+      this.agentManager.on('agent-error', (evt: { agentId: string; error: Error }) => {
+        if (evt.agentId === agentId) {
+          logError(`Agent ${agentName} error`, evt.error);
+          this.emit('agent-error', agentId, evt.error);
+        }
+      });
+
+      this.agentManager.on('agent-closed', (evt: { agentId: string; code: number | null }) => {
+        if (evt.agentId === agentId) {
+          log(`Agent ${agentName} closed with code ${evt.code}`);
+          // Clean up the session for this agent
+          const sessionId = this.agentSessions.get(agentName);
+          if (sessionId) {
+            this.sessions.delete(sessionId);
+            this.agentSessions.delete(agentName);
+            if (this.activeSessionId === sessionId) {
+              this.activeSessionId = null;
+            }
+            this.emit('agent-disconnected', agentName);
+            this.emit('active-session-changed', null);
+          }
+          this.emit('agent-closed', agentId, evt.code);
+        }
+      });
+
+      // Connect and initialize
+      const agentProcess = this.agentManager.getAgent(agentId);
+      if (!agentProcess) {
+        throw new Error('Agent process not found after spawn');
+      }
+
+      let connInfo: ConnectionInfo;
+      try {
+        connInfo = await this.connectionManager.connect(agentId, agentProcess.process);
+      } catch (e) {
+        this.agentManager.killAgent(agentId);
+        throw e;
+      }
+
+      // Create ACP session (with auth handling)
+      const sessionInfo = await this.createAcpSession(agentName, agentId, connInfo);
+
+      this.sessions.set(sessionInfo.sessionId, sessionInfo);
+      this.agentSessions.set(agentName, sessionInfo.sessionId);
+      this.activeSessionId = sessionInfo.sessionId;
+
+      this.emit('agent-connected', agentName);
+      this.emit('active-session-changed', sessionInfo.sessionId);
+
+      log(`Connected to agent ${agentName}, session ${sessionInfo.sessionId}`);
+      sendEvent('agent/connect.end', { agentName, result: 'success' }, { duration: Date.now() - connectStartTime });
+      return sessionInfo;
+    } catch (e: any) {
+      sendError('agent/connect.end', { agentName, result: 'error', errorMessage: e.message || String(e) }, { duration: Date.now() - connectStartTime });
       throw e;
     }
-
-    // Create ACP session (with auth handling)
-    const sessionInfo = await this.createAcpSession(agentName, agentId, connInfo);
-
-    this.sessions.set(sessionInfo.sessionId, sessionInfo);
-    this.agentSessions.set(agentName, sessionInfo.sessionId);
-    this.activeSessionId = sessionInfo.sessionId;
-
-    this.emit('agent-connected', agentName);
-    this.emit('active-session-changed', sessionInfo.sessionId);
-
-    log(`Connected to agent ${agentName}, session ${sessionInfo.sessionId}`);
-    return sessionInfo;
   }
 
   /**
@@ -158,6 +167,7 @@ export class SessionManager extends EventEmitter {
     if (!session) { return; }
 
     log(`Disconnecting agent ${agentName}`);
+    sendEvent('agent/disconnect', { agentName });
 
     this.agentManager.killAgent(session.agentId);
     this.connectionManager.removeConnection(session.agentId);
@@ -272,8 +282,8 @@ export class SessionManager extends EventEmitter {
       agentId,
       agentName,
       agentDisplayName: connInfo.initResponse.agentInfo?.title ||
-                        connInfo.initResponse.agentInfo?.name ||
-                        agentName,
+        connInfo.initResponse.agentInfo?.name ||
+        agentName,
       cwd,
       createdAt: new Date().toISOString(),
       initResponse: connInfo.initResponse,
