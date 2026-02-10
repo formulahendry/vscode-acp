@@ -52,7 +52,7 @@ You can add custom agent configurations in settings.
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `acp.agents` | *(8 agents)* | Agent configurations. Each key is the agent name, value has `command`, `args`, and `env`. |
-| `acp.autoApprovePermissions` | `ask` | How agent permission requests are handled: `ask`, `allowRead`, or `allowAll`. |
+| `acp.autoApprovePermissions` | `ask` | How agent permission requests are handled: `ask` or `allowAll`. |
 | `acp.defaultWorkingDirectory` | `""` | Default working directory for agent sessions. Empty uses current workspace. |
 | `acp.logTraffic` | `true` | Log all ACP protocol traffic to the ACP Traffic output channel. |
 

@@ -17,7 +17,7 @@ export class PermissionHandler {
     log(`requestPermission: ${title} (autoApprove=${autoApprove})`);
 
     // Auto-approve: pick first allow-type option
-    if (autoApprove === 'all') {
+    if (autoApprove === 'allowAll') {
       const allowOption = params.options.find(o =>
         o.kind === 'allow_once' || o.kind === 'allow_always'
       );

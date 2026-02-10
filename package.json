@@ -299,11 +299,10 @@
           "type": "string",
           "enum": [
             "ask",
-            "allowRead",
             "allowAll"
           ],
           "default": "ask",
-          "description": "Automatically approve agent permission requests. 'ask' always prompts, 'allowRead' auto-approves read operations, 'allowAll' approves everything."
+          "description": "Automatically approve agent permission requests. 'ask' always prompts, 'allowAll' approves everything."
         },
         "acp.defaultWorkingDirectory": {
           "type": "string",
