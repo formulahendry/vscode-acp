@@ -4,6 +4,15 @@ All notable changes to the "vscode-acp" extension will be documented in this fil
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.1.1] - 2026-02-10
+
+### Added
+- Login shell resolution on macOS/Linux to fix `spawn npx ENOENT` errors
+
+### Fixed
+- Fixed `autoApprovePermissions` setting: the `allowAll` option was not working due to a value mismatch
+- Removed unimplemented `allowRead` option from `autoApprovePermissions` enum
+
 ## [0.1.0] - 2026-02-08
 
 ### Added
