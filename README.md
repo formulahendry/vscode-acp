@@ -19,7 +19,7 @@ A [Visual Studio Code extension](https://marketplace.visualstudio.com/items?item
 
 ## Quick Start
 
-1. Install: [Visual Studio Code Marketplace](https://marketplace.visualstudio.com/items?itemName=formulahendry.acp-client) | [Open in VS Code](https://vscode.dev/redirect?url=vscode%3Aextension%2Fformulahendry.acp-client)
+1. Install: [Visual Studio Code Marketplace](https://marketplace.visualstudio.com/items?itemName=formulahendry.acp-client) | [Open in VS Code](https://vscode.dev/redirect?url=vscode%3Aextension%2Fformulahendry.acp-client) | [Open VSX Marketplace](https://open-vsx.org/extension/formulahendry/acp-client)
 2. Open the ACP Client panel from the Activity Bar (ACP icon)
 3. Click **+** to add an agent configuration, or use the defaults
 4. Click an agent to connect
