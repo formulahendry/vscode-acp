@@ -30,7 +30,7 @@ jobs:
         if: runner.os != 'Linux'
 
       - name: Package VSIX
-        run: vsce package
+        run: npx vsce package
 
       - name: Upload VSIX
         uses: actions/upload-artifact@v4
