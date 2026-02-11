@@ -3,7 +3,7 @@ import { marked } from 'marked';
 import { SessionManager } from '../core/SessionManager';
 import { SessionUpdateHandler, SessionUpdateListener } from '../handlers/SessionUpdateHandler';
 import type { SessionNotification } from '@agentclientprotocol/sdk';
-import { log, logError } from '../utils/Logger';
+import { logError } from '../utils/Logger';
 import { sendEvent } from '../utils/TelemetryManager';
 
 /**

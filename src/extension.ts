@@ -7,9 +7,9 @@ import { SessionUpdateHandler } from './handlers/SessionUpdateHandler';
 import { SessionTreeProvider } from './ui/SessionTreeProvider';
 import { StatusBarManager } from './ui/StatusBarManager';
 import { ChatWebviewProvider } from './ui/ChatWebviewProvider';
-import { getAgentNames, getAgentConfigs } from './config/AgentConfig';
+import { getAgentNames } from './config/AgentConfig';
 import { fetchRegistry } from './config/RegistryClient';
-import { log, logError, disposeChannels } from './utils/Logger';
+import { log, logError, disposeChannels, getOutputChannel, getTrafficChannel } from './utils/Logger';
 import { initTelemetry, sendEvent } from './utils/TelemetryManager';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -224,19 +224,16 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Show Logs
   const showLogsCmd = vscode.commands.registerCommand('acp.showLogs', () => {
-    const { getOutputChannel } = require('./utils/Logger');
     getOutputChannel().show();
   });
 
   // Show Log
   const showLogCmd = vscode.commands.registerCommand('acp.showLog', () => {
-    const { getOutputChannel } = require('./utils/Logger');
     getOutputChannel().show();
   });
 
   // Show Traffic
   const showTrafficCmd = vscode.commands.registerCommand('acp.showTraffic', () => {
-    const { getTrafficChannel } = require('./utils/Logger');
     getTrafficChannel().show();
   });
 

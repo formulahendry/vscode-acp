@@ -7,7 +7,7 @@ import { RequestError } from '@agentclientprotocol/sdk';
 import { AgentManager } from './AgentManager';
 import { ConnectionManager, ConnectionInfo } from './ConnectionManager';
 import { SessionUpdateHandler } from '../handlers/SessionUpdateHandler';
-import { AgentConfigEntry, getAgentConfigs } from '../config/AgentConfig';
+import { getAgentConfigs } from '../config/AgentConfig';
 import { log, logError } from '../utils/Logger';
 import { sendEvent, sendError } from '../utils/TelemetryManager';
 
