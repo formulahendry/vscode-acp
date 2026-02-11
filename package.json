@@ -341,6 +341,7 @@
     "@typescript-eslint/parser": "^8.0.0",
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.4.1",
+    "@vscode/vsce": "^3.7.1",
     "eslint": "^9.0.0",
     "ts-loader": "^9.5.0",
     "typescript": "^5.5.0",
