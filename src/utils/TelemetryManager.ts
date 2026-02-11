@@ -1,8 +1,18 @@
+import * as vscode from 'vscode';
 import { TelemetryReporter } from '@vscode/extension-telemetry';
 
 const CONNECTION_STRING = 'InstrumentationKey=c4d676c8-3b21-4047-8f57-804f20ccb62d';
 
 let reporter: TelemetryReporter | undefined;
+
+/** Common properties attached to every telemetry event. */
+function getCommonProperties(): Record<string, string> {
+  return {
+    ideName: vscode.env.appName,
+    ideUriScheme: vscode.env.uriScheme,
+    ideAppHost: vscode.env.appHost,
+  };
+}
 
 /**
  * Initialise the telemetry reporter.  Must be called once during
@@ -26,7 +36,7 @@ export function sendEvent(
   properties?: Record<string, string>,
   measurements?: Record<string, number>,
 ): void {
-  reporter?.sendTelemetryEvent(eventName, properties, measurements);
+  reporter?.sendTelemetryEvent(eventName, { ...getCommonProperties(), ...properties }, measurements);
 }
 
 /**
@@ -38,7 +48,7 @@ export function sendError(
   properties?: Record<string, string>,
   measurements?: Record<string, number>,
 ): void {
-  reporter?.sendTelemetryErrorEvent(eventName, properties, measurements);
+  reporter?.sendTelemetryErrorEvent(eventName, { ...getCommonProperties(), ...properties }, measurements);
 }
 
 /**
@@ -46,6 +56,7 @@ export function sendError(
  */
 export function sendException(error: Error, properties?: Record<string, string>): void {
   reporter?.sendTelemetryErrorEvent('unhandledException', {
+    ...getCommonProperties(),
     ...properties,
     errorName: error.name,
     errorMessage: error.message,
