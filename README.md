@@ -9,6 +9,8 @@ A [Visual Studio Code extension](https://marketplace.visualstudio.com/items?item
 - **Multi-Agent Support**: Connect to 8 pre-configured ACP agents or add your own
 - **Single-Agent Focus**: One agent active at a time — seamlessly switch between agents
 - **Interactive Chat**: Built-in chat panel with Markdown rendering, inline tool call display, and collapsible tool sections
+- **Thinking Display**: See agent reasoning in a collapsible block with streaming animation and elapsed time
+- **Slash Commands**: Autocomplete popup for agent-provided commands with keyboard navigation
 - **Mode & Model Picker**: Switch agent modes and models directly from the chat toolbar
 - **File System Integration**: Agents can read and write files in your workspace
 - **Terminal Execution**: Agents can run commands with terminal output display

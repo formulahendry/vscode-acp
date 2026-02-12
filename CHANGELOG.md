@@ -4,6 +4,13 @@ All notable changes to the "vscode-acp" extension will be documented in this fil
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.1.2] - 2026-02-12
+
+### Added
+- **Thinking display**: Show agent thought chunks in a collapsible block with streaming animation and elapsed time
+- **Slash commands**: Autocomplete popup for agent-provided commands with keyboard navigation (Arrow/Tab/Enter/Escape)
+- Dynamic input placeholder hint when slash commands are available
+
 ## [0.1.1] - 2026-02-10
 
 ### Added
