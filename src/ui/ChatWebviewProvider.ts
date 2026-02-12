@@ -119,6 +119,15 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     const activeId = this.sessionManager.getActiveSessionId();
     if (update.sessionId !== activeId) { return; }
 
+    // Persist available commands on session state
+    const updateData = update.update as any;
+    if (updateData?.sessionUpdate === 'available_commands_update') {
+      const session = this.sessionManager.getSession(update.sessionId);
+      if (session) {
+        session.availableCommands = updateData.availableCommands || [];
+      }
+    }
+
     this.postMessage({
       type: 'sessionUpdate',
       update: update.update,
@@ -224,6 +233,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         cwd: session.cwd,
         modes: session.modes,
         models: session.models,
+        availableCommands: session.availableCommands,
       } : null,
     });
   }
@@ -442,14 +452,62 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       border-top: 1px solid var(--vscode-panel-border);
       margin: 0.6em 0;
     }
-    .message.thought {
-      align-self: flex-start;
+    /* Thought block — collapsible <details> element */
+    .thought-block {
+      width: 100%;
+      margin-bottom: 4px;
+    }
+    .thought-block summary {
+      font-size: 0.85em;
+      opacity: 0.7;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      list-style: none;
+    }
+    .thought-block summary::-webkit-details-marker { display: none; }
+    .thought-block summary::before {
+      content: '▸';
+      font-size: 0.9em;
+      transition: transform 0.15s;
+    }
+    .thought-block[open] summary::before {
+      content: '▾';
+    }
+    .thought-block summary:hover { opacity: 1; }
+    .thought-block.streaming summary .thought-indicator {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--vscode-progressBar-background);
+      animation: thoughtPulse 1.2s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+    @keyframes thoughtPulse {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 1; }
+    }
+    .thought-block .thought-content {
+      margin-top: 4px;
+      padding: 8px 12px;
       background: var(--vscode-editorWidget-background);
       border: 1px solid var(--vscode-panel-border);
-      opacity: 0.7;
+      border-radius: 6px;
+      font-size: 0.88em;
+      opacity: 0.75;
       font-style: italic;
-      font-size: 0.9em;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 300px;
+      overflow-y: auto;
     }
+
     .message.error {
       align-self: center;
       background: var(--vscode-inputValidation-errorBackground);
@@ -646,6 +704,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
     /* Input area container */
     .input-area {
+      position: relative;
       border-top: 1px solid var(--vscode-panel-border);
       display: flex;
       flex-direction: column;
@@ -853,6 +912,57 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       opacity: 0.9;
     }
 
+    /* Slash command autocomplete popup */
+    .slash-popup {
+      display: none;
+      position: absolute;
+      bottom: 100%;
+      left: var(--container-padding);
+      right: var(--container-padding);
+      max-height: 200px;
+      overflow-y: auto;
+      background: var(--vscode-editorSuggestWidget-background, var(--vscode-dropdown-background));
+      border: 1px solid var(--vscode-editorSuggestWidget-border, var(--vscode-dropdown-border));
+      border-radius: 6px;
+      box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.25);
+      z-index: 200;
+      margin-bottom: 4px;
+    }
+    .slash-popup.open { display: block; }
+    .slash-popup-header {
+      padding: 6px 10px 4px;
+      font-size: 0.8em;
+      opacity: 0.5;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .slash-popup-item {
+      padding: 6px 10px;
+      cursor: pointer;
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+    .slash-popup-item:hover,
+    .slash-popup-item.active {
+      background: var(--vscode-list-hoverBackground);
+    }
+    .slash-popup-item .cmd-name {
+      font-weight: 600;
+      color: var(--vscode-textLink-foreground);
+      white-space: nowrap;
+      font-family: var(--vscode-editor-font-family);
+    }
+    .slash-popup-item .cmd-desc {
+      font-size: 0.9em;
+      opacity: 0.7;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+
     /* Spinner */
     .spinner {
       display: inline-block;
@@ -895,6 +1005,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   </div>
 
   <div class="input-area" id="inputArea">
+    <div class="slash-popup" id="slashPopup">
+      <div class="slash-popup-header">Commands</div>
+    </div>
     <div class="input-resize-handle" id="resizeHandle"></div>
     <div class="input-toolbar">
       <div class="picker-wrap hidden" id="modePickerWrap">
@@ -939,6 +1052,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     const bannerCwd = document.getElementById('bannerCwd');
     const inputArea = document.getElementById('inputArea');
     const resizeHandle = document.getElementById('resizeHandle');
+    const slashPopup = document.getElementById('slashPopup');
 
     // Picker elements
     const modePickerWrap = document.getElementById('modePickerWrap');
@@ -958,6 +1072,28 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     let currentModeId = null;
     let availableModels = [];
     let currentModelId = null;
+
+    // Thinking state
+    let currentThoughtEl = null;
+    let currentThoughtTextEl = null;
+    let currentThoughtText = '';
+    let thoughtStartTime = null;
+    let thoughtEndTime = null;
+
+    // Slash commands state
+    let availableCommands = [];
+    let slashPopupSelectedIdx = -1;
+    let slashFilteredCommands = [];
+    let savedPlaceholder = 'Type a message...';
+
+    function updatePlaceholder() {
+      savedPlaceholder = availableCommands.length > 0
+        ? 'Type a message or / for commands...'
+        : 'Type a message...';
+      if (!promptInput.value.startsWith('/')) {
+        promptInput.placeholder = savedPlaceholder;
+      }
+    }
 
     // --- State persistence ---
     let chatHistory = [];
@@ -988,6 +1124,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
             if (item.role === 'assistant') {
               assistantItems.push({ index: i, text: item.text });
             }
+            break;
+          case 'thought':
+            addThoughtDOM(item.text, item.durationSec || 0);
             break;
           case 'toolCall':
             addToolCallDOM(item.toolCallId, item.title, item.status);
@@ -1042,11 +1181,68 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
     // --- Auto-resize textarea (within the input area constraints) ---
     promptInput.addEventListener('input', () => {
-      // Do nothing — height is managed by the resize handle + flex layout
+      // Slash command autocomplete
+      const text = promptInput.value;
+      if (text.startsWith('/') && availableCommands.length > 0) {
+        const firstSpace = text.indexOf(' ');
+        const query = (firstSpace > 0 ? text.slice(1, firstSpace) : text.slice(1)).toLowerCase();
+        if (firstSpace < 0) {
+          // Still typing command name — show filtered popup
+          slashFilteredCommands = availableCommands.filter(c =>
+            c.name.toLowerCase().startsWith(query)
+          );
+          if (slashFilteredCommands.length > 0) {
+            renderSlashPopup(slashFilteredCommands);
+            slashPopup.classList.add('open');
+            slashPopupSelectedIdx = 0;
+            highlightSlashItem(0);
+          } else {
+            slashPopup.classList.remove('open');
+          }
+        } else {
+          slashPopup.classList.remove('open');
+        }
+      } else {
+        slashPopup.classList.remove('open');
+        if (!text.startsWith('/')) {
+          promptInput.placeholder = savedPlaceholder;
+        }
+      }
     });
 
     // Send on Enter (Shift+Enter for newline)
     promptInput.addEventListener('keydown', (e) => {
+      // Slash popup navigation
+      if (slashPopup.classList.contains('open')) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          slashPopupSelectedIdx = Math.min(slashPopupSelectedIdx + 1, slashFilteredCommands.length - 1);
+          highlightSlashItem(slashPopupSelectedIdx);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          slashPopupSelectedIdx = Math.max(slashPopupSelectedIdx - 1, 0);
+          highlightSlashItem(slashPopupSelectedIdx);
+          return;
+        }
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          selectSlashCommand(slashFilteredCommands[slashPopupSelectedIdx]);
+          return;
+        }
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          selectSlashCommand(slashFilteredCommands[slashPopupSelectedIdx]);
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          slashPopup.classList.remove('open');
+          return;
+        }
+      }
+
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         if (isProcessing) {
@@ -1107,6 +1303,49 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     // --- Mode / Model pickers ---
+
+    // --- Slash command helpers ---
+    function renderSlashPopup(commands) {
+      slashPopup.innerHTML = '<div class="slash-popup-header">Commands</div>';
+      commands.forEach((cmd, i) => {
+        const item = document.createElement('div');
+        item.className = 'slash-popup-item' + (i === 0 ? ' active' : '');
+        item.dataset.index = String(i);
+        item.innerHTML =
+          '<span class="cmd-name">/' + escapeHtml(cmd.name) + '</span>' +
+          '<span class="cmd-desc">' + escapeHtml(cmd.description) + '</span>';
+        item.addEventListener('click', () => selectSlashCommand(cmd));
+        item.addEventListener('mouseenter', () => {
+          slashPopupSelectedIdx = i;
+          highlightSlashItem(i);
+        });
+        slashPopup.appendChild(item);
+      });
+    }
+
+    function highlightSlashItem(idx) {
+      const items = slashPopup.querySelectorAll('.slash-popup-item');
+      items.forEach((el, i) => el.classList.toggle('active', i === idx));
+      if (items[idx]) items[idx].scrollIntoView({ block: 'nearest' });
+    }
+
+    function selectSlashCommand(cmd) {
+      slashPopup.classList.remove('open');
+      if (!cmd) return;
+
+      if (cmd.input) {
+        // Command expects input — insert "/name " and set placeholder to hint
+        promptInput.value = '/' + cmd.name + ' ';
+        promptInput.placeholder = cmd.input.hint || 'Type input...';
+        promptInput.focus();
+      } else {
+        // No input required — send immediately
+        promptInput.value = '/' + cmd.name;
+        handleSend();
+      }
+    }
+
+    // --- Mode / Model pickers (cont.) ---
     function updateModePicker(modes) {
       if (!modes || !modes.availableModes || modes.availableModes.length === 0) {
         modePickerWrap.classList.add('hidden');
@@ -1387,6 +1626,31 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       return div.innerHTML;
     }
 
+    function finalizeThought() {
+      if (!currentThoughtEl) return;
+      if (thoughtEndTime) return; // already finalized
+      thoughtEndTime = Date.now();
+      currentThoughtEl.classList.remove('streaming');
+      const elapsed = thoughtStartTime ? Math.round((thoughtEndTime - thoughtStartTime) / 1000) : 0;
+      const summary = currentThoughtEl.querySelector('summary');
+      if (summary) {
+        summary.innerHTML = elapsed > 0
+          ? 'Thought for ' + elapsed + 's'
+          : 'Thought';
+      }
+    }
+
+    function addThoughtDOM(text, durationSec) {
+      hideEmpty();
+      const el = document.createElement('details');
+      el.className = 'thought-block';
+      el.innerHTML =
+        '<summary>' + (durationSec > 0 ? 'Thought for ' + durationSec + 's' : 'Thought') + '</summary>' +
+        '<div class="thought-content">' + escapeHtml(text) + '</div>';
+      messagesEl.appendChild(el);
+      scrollToBottom();
+    }
+
     function showSessionConnected(session) {
       hasActiveSession = true;
       sessionState = { agentName: session.agentName, cwd: session.cwd };
@@ -1396,6 +1660,11 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       // Update pickers from session data
       if (session.modes) updateModePicker(session.modes);
       if (session.models) updateModelPicker(session.models);
+      // Restore available commands
+      if (session.availableCommands) {
+        availableCommands = session.availableCommands;
+      }
+      updatePlaceholder();
     }
 
     function showSessionConnectedFromState(ss) {
@@ -1440,9 +1709,24 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           currentToolsListEl = null;
           currentToolsCountEl = null;
           currentToolCount = 0;
+          currentThoughtEl = null;
+          currentThoughtTextEl = null;
+          currentThoughtText = '';
+          thoughtStartTime = null;
+          thoughtEndTime = null;
           break;
 
         case 'promptEnd':
+          // Finalize thought block if present
+          if (currentThoughtText) {
+            finalizeThought();
+            const tEnd = thoughtEndTime || Date.now();
+            chatHistory.push({
+              kind: 'thought',
+              text: currentThoughtText,
+              durationSec: thoughtStartTime ? Math.round((tEnd - thoughtStartTime) / 1000) : 0,
+            });
+          }
           if (currentAssistantText) {
             chatHistory.push({ kind: 'message', role: 'assistant', text: currentAssistantText });
             saveState();
@@ -1469,6 +1753,11 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           currentToolsListEl = null;
           currentToolsCountEl = null;
           currentToolCount = 0;
+          currentThoughtEl = null;
+          currentThoughtTextEl = null;
+          currentThoughtText = '';
+          thoughtStartTime = null;
+          thoughtEndTime = null;
           break;
 
         case 'clearChat':
@@ -1482,6 +1771,13 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           currentToolsListEl = null;
           currentToolsCountEl = null;
           currentToolCount = 0;
+          currentThoughtEl = null;
+          currentThoughtTextEl = null;
+          currentThoughtText = '';
+          thoughtStartTime = null;
+          thoughtEndTime = null;
+          availableCommands = [];
+          slashPopup.classList.remove('open');
           messagesEl.innerHTML = '';
           messagesEl.appendChild(emptyState);
           if (emptyState) emptyState.style.display = '';
@@ -1544,7 +1840,17 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       switch (type) {
         case 'agent_message_chunk': {
           const content = update.content;
-          if (content && content.type === 'text') {
+          if (content && content.type === 'text' && content.text) {
+            currentAssistantText += content.text;
+            // Don't create visible element until there's non-whitespace content
+            if (!currentAssistantEl && !currentAssistantText.trim()) {
+              break;
+            }
+            // Auto-collapse thought when assistant text starts
+            if (currentThoughtEl && currentThoughtEl.open) {
+              finalizeThought();
+              currentThoughtEl.open = false;
+            }
             if (!currentAssistantEl) {
               // Create a turn container, assistant text goes inside it
               if (!currentTurnEl) {
@@ -1556,9 +1862,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
               currentAssistantEl = document.createElement('div');
               currentAssistantEl.className = 'message assistant';
               currentTurnEl.insertBefore(currentAssistantEl, currentTurnEl.querySelector('.turn-tools'));
-              currentAssistantText = '';
             }
-            currentAssistantText += content.text;
             currentAssistantEl.textContent = currentAssistantText;
             scrollToBottom();
           }
@@ -1568,10 +1872,31 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         case 'user_message_chunk':
           break;
 
-        case 'thought_message_chunk': {
+        case 'agent_thought_chunk': {
           const content = update.content;
           if (content && content.type === 'text') {
-            addMessage('thought', content.text);
+            if (!currentThoughtEl) {
+              // Create thought block inside turn
+              if (!currentTurnEl) {
+                currentTurnEl = document.createElement('div');
+                currentTurnEl.className = 'turn';
+                messagesEl.appendChild(currentTurnEl);
+                hideEmpty();
+              }
+              currentThoughtEl = document.createElement('details');
+              currentThoughtEl.className = 'thought-block streaming';
+              currentThoughtEl.open = true;
+              currentThoughtEl.innerHTML =
+                '<summary><span class="thought-indicator"></span> Thinking\u2026</summary>' +
+                '<div class="thought-content"></div>';
+              currentThoughtTextEl = currentThoughtEl.querySelector('.thought-content');
+              currentTurnEl.insertBefore(currentThoughtEl, currentTurnEl.firstChild);
+              thoughtStartTime = Date.now();
+              currentThoughtText = '';
+            }
+            currentThoughtText += content.text;
+            currentThoughtTextEl.textContent = currentThoughtText;
+            scrollToBottom();
           }
           break;
         }
@@ -1612,6 +1937,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         }
 
         case 'available_commands_update':
+          availableCommands = update.availableCommands || [];
+          updatePlaceholder();
           break;
       }
     }

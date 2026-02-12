@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { EventEmitter } from 'node:events';
 
-import type { NewSessionResponse, PromptResponse, InitializeResponse, ContentBlock, SessionModeState, SessionModelState } from '@agentclientprotocol/sdk';
+import type { NewSessionResponse, PromptResponse, InitializeResponse, ContentBlock, SessionModeState, SessionModelState, AvailableCommand } from '@agentclientprotocol/sdk';
 import { RequestError } from '@agentclientprotocol/sdk';
 
 import { AgentManager } from './AgentManager';
@@ -21,6 +21,7 @@ export interface SessionInfo {
   initResponse: InitializeResponse;
   modes: SessionModeState | null;
   models: SessionModelState | null;
+  availableCommands: AvailableCommand[];
 }
 
 /**
@@ -289,6 +290,7 @@ export class SessionManager extends EventEmitter {
       initResponse: connInfo.initResponse,
       modes: sessionResponse.modes ?? null,
       models: (sessionResponse as any).models ?? null,
+      availableCommands: [],
     };
   }
 
