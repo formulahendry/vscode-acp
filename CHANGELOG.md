@@ -4,6 +4,11 @@ All notable changes to the "vscode-acp" extension will be documented in this fil
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.1.3] - 2026-02-24
+
+### Fixed
+- Queued concurrent permission requests so multiple prompts no longer clobber each other's QuickPick dialogs, which was silently cancelling approvals and causing repeated trust prompts
+
 ## [0.1.2] - 2026-02-12
 
 ### Added
