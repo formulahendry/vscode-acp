@@ -10,11 +10,14 @@ import type { RequestPermissionRequest, RequestPermissionResponse } from '@agent
  * Requests are queued so concurrent permission prompts don't clobber each other.
  */
 export class PermissionHandler {
-  private queue: Promise<RequestPermissionResponse> = Promise.resolve({ outcome: { outcome: 'cancelled' } });
+  private queue: Promise<void> = Promise.resolve();
 
   async requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
     const result = this.queue.then(() => this.handlePermission(params));
-    this.queue = result.catch(() => ({ outcome: { outcome: 'cancelled' as const } }));
+    this.queue = result.then(
+      () => undefined,
+      () => undefined,
+    );
     return result;
   }
 
