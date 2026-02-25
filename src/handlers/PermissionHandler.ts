@@ -18,7 +18,7 @@ export class PermissionHandler {
       () => undefined,
       () => undefined,
     );
-    return result;
+    return result.catch(() => ({ outcome: { outcome: 'cancelled' as const } }));
   }
 
   private async handlePermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
