@@ -222,18 +222,15 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   });
 
-  // Show Logs
-  const showLogsCmd = vscode.commands.registerCommand('acp.showLogs', () => {
-    getOutputChannel().show();
-  });
-
   // Show Log
   const showLogCmd = vscode.commands.registerCommand('acp.showLog', () => {
+    sendEvent('command/showLog');
     getOutputChannel().show();
   });
 
   // Show Traffic
   const showTrafficCmd = vscode.commands.registerCommand('acp.showTraffic', () => {
+    sendEvent('command/showTraffic');
     getTrafficChannel().show();
   });
 
@@ -394,7 +391,6 @@ export function activate(context: vscode.ExtensionContext): void {
     sendPromptCmd,
     cancelTurnCmd,
     restartAgentCmd,
-    showLogsCmd,
     showLogCmd,
     showTrafficCmd,
     setModeCmd,
