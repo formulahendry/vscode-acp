@@ -97,7 +97,7 @@ All commands are accessible via the Command Palette (`Ctrl+Shift+P`):
 ### Setup
 
 ```bash
-git clone https://github.com/your-username/vscode-acp.git
+git clone https://github.com/formulahendry/vscode-acp.git
 cd vscode-acp
 npm install
 ```
@@ -147,7 +147,7 @@ Communication with agents uses the ACP protocol (JSON-RPC 2.0 over stdio).
 
 - [ACP Client on Visual Studio Code Marketplace](https://marketplace.visualstudio.com/items?itemName=formulahendry.acp-client)
 - [Agent Client Protocol](https://agentclientprotocol.com/)
-- [GitHub Repository](https://github.com/nicepkg/vscode-acp)
+- [GitHub Repository](https://github.com/formulahendry/vscode-acp)
 
 ## License
 
