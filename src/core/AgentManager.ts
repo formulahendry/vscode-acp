@@ -97,7 +97,8 @@ export class AgentManager extends EventEmitter {
       const shellArgs = useLoginFlag ? ['-l', '-c', commandStr] : ['-c', commandStr];
 
       log(`Using shell: ${shell} ${shellArgs.join(' ')}`);
-      sendEvent('agent/spawn/shell', { shell, useLoginFlag: String(useLoginFlag) });
+      const shellName = shell.split('/').pop() || shell;
+      sendEvent('agent/spawn/shell', { shell: shellName, useLoginFlag: String(useLoginFlag) });
       return spawn(shell, shellArgs, {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...process.env, ...(config.env || {}) },
