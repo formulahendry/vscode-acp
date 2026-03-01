@@ -6,7 +6,7 @@ A [Visual Studio Code extension](https://marketplace.visualstudio.com/items?item
 
 ## Features
 
-- **Multi-Agent Support**: Connect to 8 pre-configured ACP agents or add your own
+- **Multi-Agent Support**: Connect to 9 pre-configured ACP agents or add your own
 - **Single-Agent Focus**: One agent active at a time — seamlessly switch between agents
 - **Interactive Chat**: Built-in chat panel with Markdown rendering, inline tool call display, and collapsible tool sections
 - **Thinking Display**: See agent reasoning in a collapsible block with streaming animation and elapsed time
@@ -46,6 +46,7 @@ The extension comes with default configurations for:
 | Qoder CLI | `npx @qoder-ai/qodercli@latest --acp` |
 | Codex CLI | `npx @zed-industries/codex-acp@latest` |
 | OpenCode | `npx opencode-ai@latest acp` |
+| OpenClaw | `npx openclaw acp` |
 
 You can add custom agent configurations in settings.
 
@@ -53,7 +54,7 @@ You can add custom agent configurations in settings.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `acp.agents` | *(8 agents)* | Agent configurations. Each key is the agent name, value has `command`, `args`, and `env`. |
+| `acp.agents` | *(9 agents)* | Agent configurations. Each key is the agent name, value has `command`, `args`, and `env`. |
 | `acp.autoApprovePermissions` | `ask` | How agent permission requests are handled: `ask` or `allowAll`. |
 | `acp.defaultWorkingDirectory` | `""` | Default working directory for agent sessions. Empty uses current workspace. |
 | `acp.logTraffic` | `true` | Log all ACP protocol traffic to the ACP Traffic output channel. |

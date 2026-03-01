@@ -4,6 +4,11 @@ All notable changes to the "vscode-acp" extension will be documented in this fil
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.1.3] - 2026-03-01
+
+### Added
+- **OpenClaw**: Added OpenClaw as a pre-configured agent (`npx openclaw acp`)
+
 ## [0.1.2] - 2026-02-12
 
 ### Added
