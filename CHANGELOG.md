@@ -4,6 +4,12 @@ All notable changes to the "vscode-acp" extension will be documented in this fil
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.1.5]
+
+### Fixed
+- Spawn agent processes in the workspace directory so workspace-scoped configs (e.g. .kiro/agents) are discovered correctly
+- Wire up the `acp.defaultWorkingDirectory` setting which was previously declared but unused
+
 ## [0.1.4]
 
 ### Fixed

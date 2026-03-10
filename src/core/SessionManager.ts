@@ -77,9 +77,13 @@ export class SessionManager extends EventEmitter {
     sendEvent('agent/connect.start', { agentName });
     const connectStartTime = Date.now();
 
+    // Resolve working directory: explicit setting > workspace folder > process cwd
+    const configCwd = vscode.workspace.getConfiguration('acp').get<string>('defaultWorkingDirectory', '');
+    const cwd = configCwd || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+
     try {
       // Spawn the agent process
-      const agentInstance = this.agentManager.spawnAgent(agentName, config);
+      const agentInstance = this.agentManager.spawnAgent(agentName, config, cwd);
       const agentId = agentInstance.id;
 
       // Listen for agent errors/close
@@ -123,7 +127,7 @@ export class SessionManager extends EventEmitter {
       }
 
       // Create ACP session (with auth handling)
-      const sessionInfo = await this.createAcpSession(agentName, agentId, connInfo);
+      const sessionInfo = await this.createAcpSession(agentName, agentId, connInfo, cwd);
 
       this.sessions.set(sessionInfo.sessionId, sessionInfo);
       this.agentSessions.set(agentName, sessionInfo.sessionId);
@@ -190,8 +194,8 @@ export class SessionManager extends EventEmitter {
     agentName: string,
     agentId: string,
     connInfo: ConnectionInfo,
+    cwd: string,
   ): Promise<SessionInfo> {
-    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
     let sessionResponse: NewSessionResponse;
     try {
       sessionResponse = await connInfo.connection.newSession({
