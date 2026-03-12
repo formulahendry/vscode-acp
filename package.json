@@ -30,6 +30,7 @@
     "copilot"
   ],
   "activationEvents": [],
+  "enabledApiProposals": ["inlineCompletionsAdditions"],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {

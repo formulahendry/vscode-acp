@@ -4,6 +4,17 @@ A [Visual Studio Code extension](https://marketplace.visualstudio.com/items?item
 
 ![ACP Client Screenshot](resources/screenshot.png)
 
+## Next Edit Suggestions (NES) — Experimental
+
+ACP Client supports **Next Edit Suggestions** — predictive inline edits powered by ACP agents that advertise the `nes` capability (e.g., GitHub Copilot). When you edit code, the agent predicts your next likely edit and shows it as ghost text in the editor. Press **Tab** to accept or keep typing to dismiss.
+
+NES uses VS Code's proposed `inlineCompletionsAdditions` API to render multi-line inline edits. Since this is a proposed API, you need to enable it:
+
+1. Install [VS Code Insiders](https://code.visualstudio.com/insiders/)
+2. Run with `--enable-proposed-api formulahendry.acp-client`, or follow the instructions at [Sharing extensions using the proposed API](https://code.visualstudio.com/api/advanced-topics/using-proposed-api#sharing-extensions-using-the-proposed-api)
+
+Without the proposed API enabled, NES will silently fall back to single-line suggestions only.
+
 ## Features
 
 - **Multi-Agent Support**: Connect to 9 pre-configured ACP agents or add your own

@@ -85,20 +85,25 @@ export class NESInlineCompletionProvider implements vscode.InlineCompletionItemP
         edit.range.end.character,
       );
 
-      items.push(
-        new vscode.InlineCompletionItem(
-          edit.newText,
-          range,
-          {
-            title: 'Accept NES',
-            command: 'acp.nesAccept',
-            arguments: [suggestion.id],
-          },
-        ),
+      const item = new vscode.InlineCompletionItem(
+        edit.newText,
+        range,
+        {
+          title: 'Accept NES',
+          command: 'acp.nesAccept',
+          arguments: [suggestion.id],
+        },
       );
+
+      // Use the proposed inlineCompletionsAdditions API to enable
+      // multi-line range edits (inline edit mode).
+      item.isInlineEdit = true;
+      item.showRange = range;
+
+      items.push(item);
     }
 
-    log(`NESInlineCompletionProvider: providing ${items.length} item(s) for suggestion ${suggestion.id}`);
+    log(`NESInlineCompletionProvider: providing ${items.length} inline edit(s) for suggestion ${suggestion.id}`);
     return items;
   }
 }
