@@ -16,6 +16,8 @@ export interface ConnectionInfo {
   connection: ClientSideConnection;
   client: AcpClientImpl;
   initResponse: InitializeResponse;
+  /** Whether the agent advertised NES support. */
+  supportsNES: boolean;
 }
 
 /**
@@ -88,9 +90,10 @@ export class ConnectionManager {
       },
     });
 
-    log(`ConnectionManager: initialized. Agent: ${initResponse.agentInfo?.name || 'unknown'} v${initResponse.agentInfo?.version || '?'}`);
+    const supportsNES = (initResponse.agentCapabilities as any)?.nes !== undefined;
+    log(`ConnectionManager: initialized. Agent: ${initResponse.agentInfo?.name || 'unknown'} v${initResponse.agentInfo?.version || '?'}, NES: ${supportsNES}`);
 
-    const info: ConnectionInfo = { connection, client, initResponse };
+    const info: ConnectionInfo = { connection, client, initResponse, supportsNES };
     this.connections.set(agentId, info);
 
     return info;

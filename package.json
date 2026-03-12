@@ -137,6 +137,14 @@
         "command": "acp.restartAgent",
         "title": "ACP: Restart Agent",
         "icon": "$(debug-restart)"
+      },
+      {
+        "command": "acp.nesAccept",
+        "title": "ACP: Accept Next Edit Suggestion"
+      },
+      {
+        "command": "acp.nesReject",
+        "title": "ACP: Reject Next Edit Suggestion"
       }
     ],
     "menus": {

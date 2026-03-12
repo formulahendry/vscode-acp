@@ -3,6 +3,8 @@ import * as vscode from 'vscode';
 import { AgentManager } from './core/AgentManager';
 import { ConnectionManager } from './core/ConnectionManager';
 import { SessionManager } from './core/SessionManager';
+import { NESManager } from './core/NESManager';
+import { NESInlineCompletionProvider } from './core/NESInlineCompletionProvider';
 import { SessionUpdateHandler } from './handlers/SessionUpdateHandler';
 import { SessionTreeProvider } from './ui/SessionTreeProvider';
 import { StatusBarManager } from './ui/StatusBarManager';
@@ -23,11 +25,33 @@ export function activate(context: vscode.ExtensionContext): void {
   const sessionUpdateHandler = new SessionUpdateHandler();
   const agentManager = new AgentManager();
   const connectionManager = new ConnectionManager(sessionUpdateHandler);
+  const nesManager = new NESManager();
   const sessionManager = new SessionManager(
     agentManager,
     connectionManager,
     sessionUpdateHandler,
+    nesManager,
   );
+
+  // --- NES (Next Edit Suggestions) ---
+  const nesProvider = new NESInlineCompletionProvider(nesManager);
+  const nesRegistration = vscode.languages.registerInlineCompletionItemProvider(
+    { pattern: '**' },
+    nesProvider,
+  );
+
+  // Reset NES provider state when agent disconnects
+  sessionManager.on('agent-disconnected', () => {
+    nesProvider.reset();
+  });
+
+  const nesAcceptCmd = vscode.commands.registerCommand('acp.nesAccept', (id: string) => {
+    nesManager.accept(id);
+  });
+
+  const nesRejectCmd = vscode.commands.registerCommand('acp.nesReject', (id: string) => {
+    nesManager.reject(id, 'rejected');
+  });
 
   // --- UI ---
   const sessionTreeProvider = new SessionTreeProvider(sessionManager);
@@ -400,9 +424,13 @@ export function activate(context: vscode.ExtensionContext): void {
     removeAgentCmd,
     attachFileCmd,
     browseRegistryCmd,
+    nesRegistration,
+    nesAcceptCmd,
+    nesRejectCmd,
     {
       dispose: () => {
         sessionManager.dispose();
+        nesManager.dispose();
         sessionUpdateHandler.dispose();
         chatWebviewProvider.dispose();
         sessionTreeProvider.dispose();

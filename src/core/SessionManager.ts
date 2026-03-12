@@ -6,6 +6,7 @@ import { RequestError } from '@agentclientprotocol/sdk';
 
 import { AgentManager } from './AgentManager';
 import { ConnectionManager, ConnectionInfo } from './ConnectionManager';
+import { NESManager } from './NESManager';
 import { SessionUpdateHandler } from '../handlers/SessionUpdateHandler';
 import { getAgentConfigs } from '../config/AgentConfig';
 import { log, logError } from '../utils/Logger';
@@ -42,6 +43,7 @@ export class SessionManager extends EventEmitter {
     private readonly agentManager: AgentManager,
     private readonly connectionManager: ConnectionManager,
     private readonly sessionUpdateHandler: SessionUpdateHandler,
+    private readonly nesManager: NESManager,
   ) {
     super();
   }
@@ -134,6 +136,17 @@ export class SessionManager extends EventEmitter {
 
       log(`Connected to agent ${agentName}, session ${sessionInfo.sessionId}`);
       sendEvent('agent/connect.end', { agentName, result: 'success' }, { duration: Date.now() - connectStartTime });
+
+      // Start NES if the agent supports it
+      if (connInfo.supportsNES) {
+        try {
+          await this.nesManager.start(connInfo.connection);
+          log(`NES started for agent ${agentName}`);
+        } catch (nesErr) {
+          logError('Failed to start NES (non-fatal)', nesErr);
+        }
+      }
+
       return sessionInfo;
     } catch (e: any) {
       sendError('agent/connect.end', { agentName, result: 'error', errorMessage: e.message || String(e) }, { duration: Date.now() - connectStartTime });
@@ -169,6 +182,9 @@ export class SessionManager extends EventEmitter {
 
     log(`Disconnecting agent ${agentName}`);
     sendEvent('agent/disconnect', { agentName });
+
+    // Stop NES before killing the process
+    this.nesManager.stop();
 
     this.agentManager.killAgent(session.agentId);
     this.connectionManager.removeConnection(session.agentId);
