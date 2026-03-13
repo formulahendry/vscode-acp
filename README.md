@@ -105,8 +105,8 @@ npm install
 ### Build & Run
 
 ```bash
-npm run compile    # One-time build
-npm run watch      # Watch mode for development
+npm run compile    # Build the webview (Vite) and extension host (tsup)
+npm run watch      # Watch the webview and extension host together
 ```
 
 Press `F5` in VS Code to launch the Extension Development Host.
@@ -132,6 +132,7 @@ The extension follows a modular architecture:
 - **Core**: `AgentManager`, `ConnectionManager`, `SessionManager`, `AcpClientImpl`
 - **Handlers**: `FileSystemHandler`, `TerminalHandler`, `PermissionHandler`, `SessionUpdateHandler`
 - **UI**: `SessionTreeProvider`, `ChatWebviewProvider`, `StatusBarManager`
+- **Webview v2 Scaffold**: React + Vite app under `webview/`, emitted into `resources/webview/dist`
 - **Config**: `AgentConfig`, `RegistryClient`
 - **Utils**: `Logger`, `StreamAdapter`
 

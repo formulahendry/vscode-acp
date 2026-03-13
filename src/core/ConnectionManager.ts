@@ -44,7 +44,8 @@ export class ConnectionManager {
     const readable = Readable.toWeb(process.stdout) as ReadableStream<Uint8Array>;
     const writable = Writable.toWeb(process.stdin) as WritableStream<Uint8Array>;
 
-    const stream = ndJsonStream(writable, readable);
+    const protocolReadable = this.filterProtocolInput(readable, agentId);
+    const stream = ndJsonStream(writable, protocolReadable);
 
     // Wrap the stream to intercept and log all ACP traffic
     const tappedStream = this.tapStream(stream);
@@ -137,5 +138,68 @@ export class ConnectionManager {
       writable: sendTap.writable,
       readable: recvTap.readable,
     };
+  }
+
+  /**
+   * Some agents print human-readable shutdown/auth messages to stdout.
+   * ACP stdio requires newline-delimited JSON only, so drop non-JSON lines
+   * before handing the stream to the SDK parser.
+   */
+  private filterProtocolInput(input: ReadableStream<Uint8Array>, agentId: string): ReadableStream<Uint8Array> {
+    const textDecoder = new TextDecoder();
+    const textEncoder = new TextEncoder();
+
+    const emitLine = (
+      line: string,
+      controller: ReadableStreamDefaultController<Uint8Array>,
+    ): void => {
+      const trimmedLine = line.trim();
+      if (!trimmedLine) {
+        return;
+      }
+
+      if (trimmedLine.startsWith('{') || trimmedLine.startsWith('[')) {
+        controller.enqueue(textEncoder.encode(`${trimmedLine}\n`));
+        return;
+      }
+
+      log(`[${agentId} stdout/non-acp] ${trimmedLine}`);
+    };
+
+    return new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const reader = input.getReader();
+        let buffered = '';
+
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) {
+              break;
+            }
+
+            if (!value) {
+              continue;
+            }
+
+            buffered += textDecoder.decode(value, { stream: true });
+            const lines = buffered.split('\n');
+            buffered = lines.pop() || '';
+
+            for (const line of lines) {
+              emitLine(line, controller);
+            }
+          }
+
+          buffered += textDecoder.decode();
+          if (buffered) {
+            emitLine(buffered, controller);
+          }
+        } finally {
+          reader.releaseLock();
+          controller.close();
+        }
+      },
+    });
   }
 }

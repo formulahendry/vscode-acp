@@ -4,3 +4,4 @@ out/
 *.vsix
 *.map
 .vscode-test/
+resources/webview/dist/

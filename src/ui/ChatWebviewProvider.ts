@@ -7,6 +7,8 @@ import { SessionUpdateHandler, SessionUpdateListener } from '../handlers/Session
 import { logError } from '../utils/Logger';
 import { sendEvent } from '../utils/TelemetryManager';
 
+type WebviewRuntime = 'legacy' | 'react-shell';
+
 type WebviewMessage = {
   type: string;
   [key: string]: unknown;
@@ -21,6 +23,8 @@ type FileSelection = {
   cursorLine?: number;
   cursorCharacter?: number;
 } | null;
+
+const WEBVIEW_RUNTIME: WebviewRuntime = 'react-shell';
 
 /**
  * WebviewViewProvider for the ACP chat sidebar.
@@ -51,9 +55,6 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     this.sessionUpdateHandler.addListener(this.updateListener);
   }
 
-  /**
-   * Render markdown text to HTML using marked.
-   */
   private renderMarkdown(text: string): string {
     try {
       return marked.parse(text) as string;
@@ -62,9 +63,6 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /**
-   * Escape HTML special characters to prevent injection.
-   */
   private escapeHtml(text: string): string {
     return text
       .replace(/&/g, '&amp;')
@@ -133,11 +131,6 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = await this.getHtmlContent(webviewView.webview);
   }
 
-  /**
-   * Forward session update to webview.
-   */
-  private handleSessionUpdate(update: SessionNotification): void {
-
   private handleSessionUpdate(update: SessionNotification): void {
     const activeId = this.sessionManager.getActiveSessionId();
     if (update.sessionId !== activeId) {
@@ -159,9 +152,6 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  /**
-   * Handle a prompt sent from the webview.
-   */
   private async handleSendPrompt(text: string): Promise<void> {
     const activeId = this.sessionManager.getActiveSessionId();
     if (!activeId) {
@@ -197,9 +187,6 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /**
-   * Handle cancel request from webview.
-   */
   private async handleCancelTurn(): Promise<void> {
     const activeId = this.sessionManager.getActiveSessionId();
     if (!activeId) {
@@ -213,9 +200,6 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /**
-   * Handle mode change from webview picker.
-   */
   private async handleSetMode(modeId: string): Promise<void> {
     const activeId = this.sessionManager.getActiveSessionId();
     if (!activeId || !modeId) {
@@ -230,9 +214,6 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /**
-   * Handle model change from webview picker.
-   */
   private async handleSetModel(modelId: string): Promise<void> {
     const activeId = this.sessionManager.getActiveSessionId();
     if (!activeId || !modelId) {
@@ -247,9 +228,6 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /**
-   * Send current session state to the webview on load.
-   */
   private sendCurrentState(): void {
     if (!this.view || !this.isViewReady) {
       return;
@@ -271,9 +249,6 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  /**
-   * Post a message to the webview if it exists.
-   */
   private postMessage(message: WebviewMessage): void {
     if (!this.view || !this.isViewReady) {
       this.pendingMessages.push(message);
@@ -295,16 +270,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /**
-   * Notify webview of a new active session.
-   */
   notifyActiveSessionChanged(): void {
     this.sendCurrentState();
   }
 
-  /**
-   * Notify webview of mode state changes.
-   */
   notifyModesUpdate(modes: any): void {
     if (!this.isViewReady) {
       return;
@@ -312,9 +281,6 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     this.postMessage({ type: 'modesUpdate', modes });
   }
 
-  /**
-   * Notify webview of model state changes.
-   */
   notifyModelsUpdate(models: any): void {
     if (!this.isViewReady) {
       return;
@@ -322,25 +288,15 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     this.postMessage({ type: 'modelsUpdate', models });
   }
 
-  /**
-   * Clear the chat history and reset to welcome state.
-   * Called when starting a new conversation.
-   */
   clearChat(): void {
     this._hasChatContent = false;
     this.postMessage({ type: 'clearChat' });
   }
 
-  /**
-   * Whether the chat has any messages.
-   */
   get hasChatContent(): boolean {
     return this._hasChatContent;
   }
 
-  /**
-   * Allows the extension host to send a quick prompt via the webview.
-   */
   async sendPromptFromExtension(text: string): Promise<void> {
     if (!text.trim()) {
       return;
@@ -356,9 +312,6 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     await this.handleSendPrompt(text);
   }
 
-  /**
-   * Attach a file URI — notify the webview to include it in the next prompt.
-   */
   attachFile(uri: vscode.Uri, selection?: FileSelection): void {
     const payload: WebviewMessage = {
       type: 'file-attached',
@@ -378,12 +331,15 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     this.sessionUpdateHandler.removeListener(this.updateListener);
   }
 
-  /**
-   * Load HTML template for the webview, replacing nonce and CSP source.
-   */
   private async getHtmlContent(webview: vscode.Webview): Promise<string> {
+    return WEBVIEW_RUNTIME === 'legacy'
+      ? this.getLegacyHtmlContent(webview)
+      : this.getReactShellHtmlContent(webview);
+  }
+
+  private async getLegacyHtmlContent(webview: vscode.Webview): Promise<string> {
     const nonce = getNonce();
-    const templateUri = vscode.Uri.joinPath(this.extensionUri, 'resources', 'webview', 'chat.html');
+    const templateUri = vscode.Uri.joinPath(this.extensionUri, 'resources', 'webview', 'chat.legacy.html');
 
     try {
       const bytes = await vscode.workspace.fs.readFile(templateUri);
@@ -391,8 +347,33 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         .replace(/__NONCE__/g, nonce)
         .replace(/__CSP_SOURCE__/g, webview.cspSource);
     } catch (e: any) {
-      logError('Failed to load webview template', e);
-      return '<!DOCTYPE html><html><body><pre>Failed to load webview template</pre></body></html>';
+      logError('Failed to load legacy webview template', e);
+      return '<!DOCTYPE html><html><body><pre>Failed to load legacy webview template</pre></body></html>';
+    }
+  }
+
+  private async getReactShellHtmlContent(webview: vscode.Webview): Promise<string> {
+    const templateUri = vscode.Uri.joinPath(this.extensionUri, 'resources', 'webview', 'chat.html');
+    const processShimUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'resources', 'webview', 'process-shim.js'),
+    );
+    const scriptUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'resources', 'webview', 'dist', 'chat.js'),
+    );
+    const styleUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'resources', 'webview', 'dist', 'chat.css'),
+    );
+
+    try {
+      const bytes = await vscode.workspace.fs.readFile(templateUri);
+      return Buffer.from(bytes).toString('utf8')
+        .replace(/__CSP_SOURCE__/g, webview.cspSource)
+        .replace(/__PROCESS_SHIM_URI__/g, processShimUri.toString())
+        .replace(/__SCRIPT_URI__/g, scriptUri.toString())
+        .replace(/__STYLE_URI__/g, styleUri.toString());
+    } catch (e: any) {
+      logError('Failed to load React shell webview template', e);
+      return '<!DOCTYPE html><html><body><pre>Failed to load React shell webview template</pre></body></html>';
     }
   }
 }
