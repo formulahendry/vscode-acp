@@ -6,7 +6,7 @@ A [Visual Studio Code extension](https://marketplace.visualstudio.com/items?item
 
 ## Features
 
-- **Multi-Agent Support**: Connect to 9 pre-configured ACP agents or add your own
+- **Multi-Agent Support**: Connect to 10 pre-configured ACP agents or add your own
 - **Single-Agent Focus**: One agent active at a time — seamlessly switch between agents
 - **Interactive Chat**: Built-in chat panel with Markdown rendering, inline tool call display, and collapsible tool sections
 - **Thinking Display**: See agent reasoning in a collapsible block with streaming animation and elapsed time
@@ -47,6 +47,7 @@ The extension comes with default configurations for:
 | Codex CLI | `npx @zed-industries/codex-acp@latest` |
 | OpenCode | `npx opencode-ai@latest acp` |
 | OpenClaw | `npx openclaw acp` |
+| KiroCli | `~/.local/bin/kiro-cli acp` |
 
 You can add custom agent configurations in settings.
 
