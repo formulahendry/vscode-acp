@@ -300,6 +300,11 @@
                 "acp"
               ],
               "env": {}
+            },
+            "KiroCli": {
+              "command": "~/.local/bin/kiro-cli",
+              "args": ["acp"],
+              "env": {}
             }
           }
         },

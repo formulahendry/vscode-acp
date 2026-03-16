@@ -1,6 +1,5 @@
 node_modules/
 dist/
 out/
-*.vsix
 *.map
 .vscode-test/
