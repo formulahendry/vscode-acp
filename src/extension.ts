@@ -7,6 +7,8 @@ import { SessionUpdateHandler } from './handlers/SessionUpdateHandler';
 import { SessionTreeProvider } from './ui/SessionTreeProvider';
 import { StatusBarManager } from './ui/StatusBarManager';
 import { ChatWebviewProvider } from './ui/ChatWebviewProvider';
+import { QuickPromptPanel } from './ui/QuickPromptPanel';
+import { captureEditorSnapshot, type EditorSnapshot } from './ui/EditorSnapshot';
 import { getAgentNames } from './config/AgentConfig';
 import { fetchRegistry } from './config/RegistryClient';
 import { log, logError, disposeChannels, getOutputChannel, getTrafficChannel } from './utils/Logger';
@@ -45,12 +47,19 @@ export function activate(context: vscode.ExtensionContext): void {
     chatWebviewProvider,
     { webviewOptions: { retainContextWhenHidden: true } },
   );
+  const quickPromptPanel = new QuickPromptPanel(
+    context.extensionUri,
+    sessionManager,
+    sessionUpdateHandler,
+    chatWebviewProvider,
+  );
 
   const statusBarManager = new StatusBarManager(sessionManager);
 
   // Notify chat webview when active session changes
   sessionManager.on('active-session-changed', () => {
     chatWebviewProvider.notifyActiveSessionChanged();
+    quickPromptPanel.notifyActiveSessionChanged();
   });
 
   // Clear chat when new conversation is started
@@ -59,41 +68,19 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   // Persistent snapshot of active editor (updated before each prompt window open)
-  let editorSnapshot: {
-    uri: vscode.Uri;
-    name: string;
-    cursorLine: number;
-    cursorCharacter: number;
-    selection: { startLine: number; startCharacter: number; endLine: number; endCharacter: number; text: string } | null;
-  } | null = null;
+  let editorSnapshot: EditorSnapshot | null = null;
 
-  function captureEditorSnapshot(): void {
-    const ed = vscode.window.activeTextEditor;
-    if (!ed || !ed.document || !ed.document.uri) {
-      return; // garder le dernier snapshot valide
+  function refreshEditorSnapshot(): void {
+    const nextSnapshot = captureEditorSnapshot(vscode.window.activeTextEditor);
+    if (nextSnapshot) {
+      editorSnapshot = nextSnapshot;
     }
-    const sel = ed.selection;
-    const cursorLine = sel.active.line + 1;
-    const cursorCharacter = sel.active.character + 1;
-    editorSnapshot = {
-      uri: ed.document.uri,
-      name: ed.document.uri.fsPath.split(/[\/\\]/).pop() || ed.document.uri.fsPath,
-      cursorLine,
-      cursorCharacter,
-      selection: sel.isEmpty ? null : {
-        startLine: sel.start.line + 1,
-        startCharacter: sel.start.character + 1,
-        endLine: sel.end.line + 1,
-        endCharacter: sel.end.character + 1,
-        text: ed.document.getText(sel),
-      },
-    };
   }
 
-  captureEditorSnapshot();
+  refreshEditorSnapshot();
   context.subscriptions.push(
-    vscode.window.onDidChangeActiveTextEditor(() => captureEditorSnapshot()),
-    vscode.window.onDidChangeTextEditorSelection(() => captureEditorSnapshot()),
+    vscode.window.onDidChangeActiveTextEditor(() => refreshEditorSnapshot()),
+    vscode.window.onDidChangeTextEditorSelection(() => refreshEditorSnapshot()),
   );
 
   // Forward mode/model changes to webview
@@ -101,6 +88,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const session = sessionManager.getActiveSession();
     if (session?.modes) {
       chatWebviewProvider.notifyModesUpdate(session.modes);
+      quickPromptPanel.notifyModesUpdate(session.modes);
     }
   });
 
@@ -108,6 +96,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const session = sessionManager.getActiveSession();
     if (session?.models) {
       chatWebviewProvider.notifyModelsUpdate(session.models);
+      quickPromptPanel.notifyModelsUpdate(session.models);
     }
   });
 
@@ -226,45 +215,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Quick prompt keyboard shortcut (Option+Cmd+O)
   const quickPromptCmd = vscode.commands.registerCommand('acp.quickPrompt', async () => {
-    // Use captured snapshot before opening prompt input
-    captureEditorSnapshot();
-    const snap = editorSnapshot;
-    let promptPrefix = '';
-    if (snap) {
-      const cursorPos = `${snap.cursorLine}:${snap.cursorCharacter}`;
-      if (snap.selection) {
-        const header = `${snap.name} [${snap.selection.startLine}:${snap.selection.startCharacter}-${snap.selection.endLine}:${snap.selection.endCharacter}] [cursor ${cursorPos}]`;
-        promptPrefix = `${header}\n${snap.selection.text}\n\n`;
-      } else {
-        promptPrefix = `${snap.name} (${snap.uri.fsPath}) [cursor ${cursorPos}]\n\n`;
-      }
-    }
-
-    // Afficher l'input AVANT de changer le focus
-    let inputTitle = 'ACP Quick Prompt';
-    if (snap) {
-      const cursorPos = `${snap.cursorLine}:${snap.cursorCharacter}`;
-      if (snap.selection) {
-        inputTitle = `ACP Quick Prompt — ${snap.name} [${snap.selection.startLine}:${snap.selection.startCharacter}-${snap.selection.endLine}:${snap.selection.endCharacter}] [cursor ${cursorPos}]`;
-      } else {
-        inputTitle = `ACP Quick Prompt — ${snap.name} [cursor ${cursorPos}]`;
-      }
-    }
-
-    const userText = await vscode.window.showInputBox({
-      prompt: 'Send a quick prompt to the active agent',
-      placeHolder: 'Type your message...',
-      title: inputTitle,
-    });
-
-    const trimmedUser = userText?.trim() ?? '';
-    if (!trimmedUser) { return; }
-
-    // Now focus chat and send
-    await vscode.commands.executeCommand('acp-chat.focus');
-
-    const finalPrompt = `${promptPrefix}${trimmedUser}`.trim();
-    await chatWebviewProvider.sendPromptFromExtension(finalPrompt);
+    refreshEditorSnapshot();
+    await quickPromptPanel.show(editorSnapshot);
   });
 
   // Cancel current turn
@@ -507,6 +459,7 @@ export function activate(context: vscode.ExtensionContext): void {
         sessionManager.dispose();
         sessionUpdateHandler.dispose();
         chatWebviewProvider.dispose();
+        quickPromptPanel.dispose();
         sessionTreeProvider.dispose();
         disposeChannels();
       },

@@ -32,6 +32,152 @@ body {
   min-height: 0;
 }
 
+body[data-view-kind='quick-prompt'] {
+  background:
+    radial-gradient(circle at top, color-mix(in srgb, var(--vscode-focusBorder) 14%, transparent), transparent 45%),
+    var(--vscode-editor-background);
+}
+
+body[data-view-kind='quick-prompt'] #root {
+  padding: 24px;
+}
+
+.quick-prompt-shell {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+}
+
+.quick-prompt-modal {
+  width: min(880px, 100%);
+  min-height: min(760px, 100%);
+  display: flex;
+  flex-direction: column;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--vscode-editorWidget-background) 86%, transparent),
+      color-mix(in srgb, var(--vscode-editor-background) 96%, transparent)
+    );
+  border: 1px solid color-mix(in srgb, var(--vscode-focusBorder) 30%, var(--vscode-panel-border));
+  border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+
+.quick-prompt-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 24px 16px;
+}
+
+.quick-prompt-eyebrow {
+  font-size: 0.82em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.68;
+  margin-bottom: 6px;
+}
+
+.quick-prompt-title {
+  font-size: 1.4em;
+  font-weight: 650;
+}
+
+.quick-prompt-subtitle {
+  margin-top: 6px;
+  line-height: 1.5;
+  opacity: 0.72;
+}
+
+.quick-prompt-close,
+.quick-prompt-connect {
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 999px;
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  cursor: pointer;
+  font: inherit;
+  padding: 6px 12px;
+}
+
+.quick-prompt-close:hover,
+.quick-prompt-connect:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.quick-prompt-card {
+  margin: 0 24px;
+  padding: 16px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--vscode-editorWidget-background) 78%, transparent);
+}
+
+.quick-prompt-card-title {
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.quick-prompt-selection {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--vscode-textCodeBlock-background);
+  border: 1px solid var(--vscode-panel-border);
+  font-family: var(--vscode-editor-font-family);
+  line-height: 1.45;
+}
+
+.quick-prompt-selection-empty {
+  font-family: var(--vscode-font-family);
+  opacity: 0.72;
+}
+
+.quick-prompt-status,
+.quick-prompt-error {
+  margin: 16px 24px 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.quick-prompt-status {
+  background: color-mix(in srgb, var(--vscode-editorInfo-background, var(--vscode-editorWidget-background)) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--vscode-focusBorder) 24%, var(--vscode-panel-border));
+}
+
+.quick-prompt-status.disconnected {
+  background: color-mix(in srgb, var(--vscode-editorWarning-background, var(--vscode-editorWidget-background)) 78%, transparent);
+}
+
+.quick-prompt-error {
+  justify-content: flex-start;
+  background: var(--vscode-inputValidation-errorBackground);
+  color: var(--vscode-inputValidation-errorForeground);
+  border: 1px solid var(--vscode-inputValidation-errorBorder);
+}
+
+body[data-view-kind='quick-prompt'] .input-area {
+  background: transparent;
+  border-top: none;
+  flex: 1;
+  padding-top: 12px;
+}
+
+body[data-view-kind='quick-prompt'] .input-editor-wrap textarea {
+  min-height: 180px;
+}
+
 .session-banner {
   display: none;
   padding: 10px var(--container-padding);

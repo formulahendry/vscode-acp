@@ -6,8 +6,7 @@ import { SessionManager } from '../core/SessionManager';
 import { SessionUpdateHandler, SessionUpdateListener } from '../handlers/SessionUpdateHandler';
 import { log, logError } from '../utils/Logger';
 import { sendEvent } from '../utils/TelemetryManager';
-
-type WebviewRuntime = 'legacy' | 'react-shell';
+import { getReactShellHtmlContent } from './WebviewHtml';
 
 type WebviewMessage = {
   type: string;
@@ -23,8 +22,6 @@ type FileSelection = {
   cursorLine?: number;
   cursorCharacter?: number;
 } | null;
-
-const WEBVIEW_RUNTIME: WebviewRuntime = 'react-shell';
 
 /**
  * WebviewViewProvider for the ACP chat sidebar.
@@ -137,14 +134,6 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     log('ChatWebviewProvider.handleSessionUpdate called', update);
     if (update.sessionId !== activeId) {
       return;
-    }
-
-    const updateData = update.update as any;
-    if (updateData?.sessionUpdate === 'available_commands_update') {
-      const session = this.sessionManager.getSession(update.sessionId);
-      if (session) {
-        session.availableCommands = updateData.availableCommands || [];
-      }
     }
 
     this.postMessage({
@@ -334,57 +323,6 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   private async getHtmlContent(webview: vscode.Webview): Promise<string> {
-    return WEBVIEW_RUNTIME === 'legacy'
-      ? this.getLegacyHtmlContent(webview)
-      : this.getReactShellHtmlContent(webview);
+    return getReactShellHtmlContent(this.extensionUri, webview, 'chat');
   }
-
-  private async getLegacyHtmlContent(webview: vscode.Webview): Promise<string> {
-    const nonce = getNonce();
-    const templateUri = vscode.Uri.joinPath(this.extensionUri, 'resources', 'webview', 'chat.legacy.html');
-
-    try {
-      const bytes = await vscode.workspace.fs.readFile(templateUri);
-      return Buffer.from(bytes).toString('utf8')
-        .replace(/__NONCE__/g, nonce)
-        .replace(/__CSP_SOURCE__/g, webview.cspSource);
-    } catch (e: any) {
-      logError('Failed to load legacy webview template', e);
-      return '<!DOCTYPE html><html><body><pre>Failed to load legacy webview template</pre></body></html>';
-    }
-  }
-
-  private async getReactShellHtmlContent(webview: vscode.Webview): Promise<string> {
-    const templateUri = vscode.Uri.joinPath(this.extensionUri, 'resources', 'webview', 'chat.html');
-    const processShimUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'resources', 'webview', 'process-shim.js'),
-    );
-    const scriptUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'resources', 'webview', 'dist', 'chat.js'),
-    );
-    const styleUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'resources', 'webview', 'dist', 'chat.css'),
-    );
-
-    try {
-      const bytes = await vscode.workspace.fs.readFile(templateUri);
-      return Buffer.from(bytes).toString('utf8')
-        .replace(/__CSP_SOURCE__/g, webview.cspSource)
-        .replace(/__PROCESS_SHIM_URI__/g, processShimUri.toString())
-        .replace(/__SCRIPT_URI__/g, scriptUri.toString())
-        .replace(/__STYLE_URI__/g, styleUri.toString());
-    } catch (e: any) {
-      logError('Failed to load React shell webview template', e);
-      return '<!DOCTYPE html><html><body><pre>Failed to load React shell webview template</pre></body></html>';
-    }
-  }
-}
-
-function getNonce(): string {
-  let text = '';
-  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  for (let i = 0; i < 32; i++) {
-    text += possible.charAt(Math.floor(Math.random() * possible.length));
-  }
-  return text;
 }

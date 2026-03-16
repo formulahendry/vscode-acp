@@ -117,6 +117,14 @@ export type FileSelection = {
   cursorCharacter?: number;
 };
 
+export type EditorSnapshot = {
+  uriPath?: string;
+  name?: string;
+  cursorLine?: number;
+  cursorCharacter?: number;
+  selection?: FileSelection | null;
+};
+
 export type SessionContentChunk = {
   type?: string;
   text?: string;

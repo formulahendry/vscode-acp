@@ -1,4 +1,5 @@
 import type {
+  EditorSnapshot,
   FileSelection,
   MarkdownRenderItem,
   MarkdownRenderedItem,
@@ -9,7 +10,12 @@ import type {
 } from './chatTypes';
 
 export type HostToWebviewMessage =
-  | { type: 'state'; activeSessionId?: string | null; session?: SessionSnapshot | null }
+  | {
+      type: 'state';
+      activeSessionId?: string | null;
+      session?: SessionSnapshot | null;
+      editorSnapshot?: EditorSnapshot | null;
+    }
   | { type: 'sessionUpdate'; update: SessionUpdate; sessionId?: string }
   | { type: 'promptStart' }
   | { type: 'promptEnd'; stopReason?: string; usage?: unknown }
@@ -24,6 +30,10 @@ export type HostToWebviewMessage =
 
 export type WebviewToHostMessage =
   | { type: 'ready' }
+  | { type: 'quickPromptReady' }
+  | { type: 'quickPromptSubmit'; text: string }
+  | { type: 'quickPromptConnect' }
+  | { type: 'quickPromptDismiss' }
   | { type: 'sendPrompt'; text: string }
   | { type: 'cancelTurn' }
   | { type: 'setMode'; modeId: string }

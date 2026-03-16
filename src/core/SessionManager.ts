@@ -37,6 +37,9 @@ export class SessionManager extends EventEmitter {
 
   /** Maps agentName → activeSessionId for the one-session-per-agent model. */
   private agentSessions: Map<string, string> = new Map();
+  private readonly sessionUpdateListener = (notification: { sessionId: string; update: unknown }) => {
+    this.applySessionUpdate(notification.sessionId, notification.update);
+  };
 
   constructor(
     private readonly agentManager: AgentManager,
@@ -44,6 +47,36 @@ export class SessionManager extends EventEmitter {
     private readonly sessionUpdateHandler: SessionUpdateHandler,
   ) {
     super();
+    this.sessionUpdateHandler.addListener(this.sessionUpdateListener);
+  }
+
+  private applySessionUpdate(sessionId: string, update: unknown): void {
+    const session = this.sessions.get(sessionId);
+    if (!session || !update || typeof update !== 'object') {
+      return;
+    }
+
+    const sessionUpdate = update as Record<string, unknown>;
+    switch (sessionUpdate.sessionUpdate) {
+      case 'available_commands_update':
+        session.availableCommands = Array.isArray(sessionUpdate.availableCommands)
+          ? sessionUpdate.availableCommands as AvailableCommand[]
+          : [];
+        break;
+
+      case 'current_mode_update': {
+        const nextModeId =
+          typeof sessionUpdate.currentModeId === 'string'
+            ? sessionUpdate.currentModeId
+            : typeof sessionUpdate.modeId === 'string'
+              ? sessionUpdate.modeId
+              : null;
+        if (session.modes) {
+          session.modes.currentModeId = nextModeId;
+        }
+        break;
+      }
+    }
   }
 
   /**
@@ -422,6 +455,7 @@ export class SessionManager extends EventEmitter {
   // --- Cleanup ---
 
   dispose(): void {
+    this.sessionUpdateHandler.removeListener(this.sessionUpdateListener);
     this.agentManager.killAll();
     this.connectionManager.dispose();
     this.sessions.clear();

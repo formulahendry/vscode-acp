@@ -1,5 +1,6 @@
 import type {
   ChatHistoryItem,
+  EditorSnapshot,
   FileSelection,
   MarkdownRenderedItem,
   MessageHistoryItem,
@@ -140,6 +141,21 @@ export function normalizeFileSelection(value: unknown): FileSelection | undefine
     text: typeof candidate.text === 'string' ? candidate.text : undefined,
     cursorLine: typeof candidate.cursorLine === 'number' ? candidate.cursorLine : undefined,
     cursorCharacter: typeof candidate.cursorCharacter === 'number' ? candidate.cursorCharacter : undefined,
+  };
+}
+
+export function normalizeEditorSnapshot(value: unknown): EditorSnapshot | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const candidate = value as Partial<EditorSnapshot>;
+  return {
+    uriPath: typeof candidate.uriPath === 'string' ? candidate.uriPath : undefined,
+    name: typeof candidate.name === 'string' ? candidate.name : undefined,
+    cursorLine: typeof candidate.cursorLine === 'number' ? candidate.cursorLine : undefined,
+    cursorCharacter: typeof candidate.cursorCharacter === 'number' ? candidate.cursorCharacter : undefined,
+    selection: normalizeFileSelection(candidate.selection) ?? null,
   };
 }
 
