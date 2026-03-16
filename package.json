@@ -29,7 +29,27 @@
     "coding agent",
     "copilot"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onView:acp-sessions",
+    "onView:acp-chat",
+    "onCommand:acp.connectAgent",
+    "onCommand:acp.newConversation",
+    "onCommand:acp.sendPrompt",
+    "onCommand:acp.quickPrompt",
+    "onCommand:acp.cancelTurn",
+    "onCommand:acp.disconnectAgent",
+    "onCommand:acp.openChat",
+    "onCommand:acp.addAgent",
+    "onCommand:acp.removeAgent",
+    "onCommand:acp.showLog",
+    "onCommand:acp.showTraffic",
+    "onCommand:acp.browseRegistry",
+    "onCommand:acp.setMode",
+    "onCommand:acp.setModel",
+    "onCommand:acp.refreshAgents",
+    "onCommand:acp.restartAgent",
+    "onCommand:acp.attachFile"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
