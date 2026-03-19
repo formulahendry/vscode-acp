@@ -64,7 +64,9 @@ export class NESInlineCompletionProvider implements vscode.InlineCompletionItemP
 
     this.currentSuggestionId = suggestion.id;
 
-    return this.convertToInlineCompletions(suggestion);
+    const items = this.convertToInlineCompletions(suggestion);
+    log(`NESInlineCompletionProvider: returning ${items.length} item(s) to VS Code for suggestion ${suggestion.id}, isInlineEdit=${items[0]?.isInlineEdit}, range=${JSON.stringify(items[0]?.range)}, showRange=${JSON.stringify(items[0]?.showRange)}`);
+    return items;
   }
 
   /**
