@@ -34,8 +34,12 @@ export async function fetchRegistry(): Promise<RegistryAgent[]> {
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => abortController.abort(), FETCH_TIMEOUT);
 
-    const response = await fetch(REGISTRY_URL, { signal: abortController.signal });
-    clearTimeout(timeoutId);
+    let response: Response;
+    try {
+      response = await fetch(REGISTRY_URL, { signal: abortController.signal });
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -46,6 +50,9 @@ export async function fetchRegistry(): Promise<RegistryAgent[]> {
     log(`Registry fetched: ${data.agents?.length || 0} agents`);
     return data.agents || [];
   } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') {
+      log(`Registry fetch timed out after ${FETCH_TIMEOUT}ms`);
+    }
     logError('Failed to fetch registry', e);
     return cachedRegistry?.agents || [];
   }
