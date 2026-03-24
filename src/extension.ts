@@ -14,6 +14,14 @@ import { initTelemetry, sendEvent } from './utils/TelemetryManager';
 
 export function activate(context: vscode.ExtensionContext): void {
   log('ACP Client extension activating...');
+  const showLogAction = 'Show Log';
+
+  const showErrorWithLogAction = async (message: string): Promise<void> => {
+    const choice = await vscode.window.showErrorMessage(message, showLogAction);
+    if (choice === showLogAction) {
+      await vscode.commands.executeCommand('acp.showLog');
+    }
+  };
 
   // --- Telemetry ---
   const telemetryReporter = initTelemetry();
@@ -128,7 +136,7 @@ export function activate(context: vscode.ExtensionContext): void {
       );
     } catch (e: any) {
       logError('Failed to connect to agent', e);
-      vscode.window.showErrorMessage(`Failed to connect to ${agentName}: ${e.message}`);
+      await showErrorWithLogAction(`Failed to connect to ${agentName}: ${e.message}`);
     }
   });
 
@@ -167,7 +175,7 @@ export function activate(context: vscode.ExtensionContext): void {
       );
     } catch (e: any) {
       logError('Failed to start new conversation', e);
-      vscode.window.showErrorMessage(`Failed to start new conversation: ${e.message}`);
+      await showErrorWithLogAction(`Failed to start new conversation: ${e.message}`);
     }
   });
 
@@ -227,7 +235,7 @@ export function activate(context: vscode.ExtensionContext): void {
       );
       vscode.window.showInformationMessage(`Restarted ${agentName}`);
     } catch (e: any) {
-      vscode.window.showErrorMessage(`Failed to restart ${agentName}: ${e.message}`);
+      await showErrorWithLogAction(`Failed to restart ${agentName}: ${e.message}`);
     }
   });
 
