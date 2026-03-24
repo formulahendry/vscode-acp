@@ -14,6 +14,71 @@ import { initTelemetry, sendEvent } from './utils/TelemetryManager';
 
 export function activate(context: vscode.ExtensionContext): void {
   log('ACP Client extension activating...');
+  const showLogAction = 'Show Log';
+
+  const showErrorWithLogAction = async (message: string): Promise<void> => {
+    const choice = await vscode.window.showErrorMessage(message, showLogAction);
+    if (choice === showLogAction) {
+      await vscode.commands.executeCommand('acp.showLog');
+    }
+  };
+
+  const isCancellationError = (error: unknown): boolean => {
+    if (error instanceof vscode.CancellationError) {
+      return true;
+    }
+
+    if (!(error instanceof Error)) {
+      return false;
+    }
+
+    return error.name === 'AbortError' || /cancelled by user/i.test(error.message);
+  };
+
+  const runWithConnectNotification = async <T>(
+    title: string,
+    onCancelLogMessage: string,
+    task: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> => {
+    const cancelAction = 'Cancel';
+    const abortController = new AbortController();
+
+    const settledTask = task(abortController.signal).then(
+      (value) => ({ status: 'fulfilled' as const, value }),
+      (reason) => ({ status: 'rejected' as const, reason }),
+    );
+
+    const firstResult = await Promise.race([
+      settledTask.then(result => ({ type: 'task' as const, result })),
+      vscode.window.showInformationMessage(title, cancelAction)
+        .then(action => ({ type: 'action' as const, action })),
+    ]);
+
+    if (firstResult.type === 'task') {
+      if (firstResult.result.status === 'fulfilled') {
+        return firstResult.result.value;
+      }
+      throw firstResult.result.reason;
+    }
+
+    if (firstResult.action === cancelAction) {
+      log(onCancelLogMessage);
+      abortController.abort();
+
+      const finalResult = await settledTask;
+      if (finalResult.status === 'rejected' && !isCancellationError(finalResult.reason)) {
+        throw finalResult.reason;
+      }
+      throw new vscode.CancellationError();
+    }
+
+    // Dismiss/ignore notification: continue task and wait for completion.
+    const finalResult = await settledTask;
+    if (finalResult.status === 'fulfilled') {
+      return finalResult.value;
+    }
+    throw finalResult.reason;
+  };
 
   // --- Telemetry ---
   const telemetryReporter = initTelemetry();
@@ -113,19 +178,19 @@ export function activate(context: vscode.ExtensionContext): void {
     }
 
     try {
-      await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: `Connecting to ${agentName}...`,
-          cancellable: false,
-        },
-        async () => {
-          await sessionManager.connectToAgent(agentName!);
+      await runWithConnectNotification(
+        `Connecting to ${agentName}...`,
+        `Connection to ${agentName} cancelled by user`,
+        async (signal) => {
+          await sessionManager.connectToAgent(agentName!, { signal });
         },
       );
     } catch (e: any) {
+      if (isCancellationError(e)) {
+        return;
+      }
       logError('Failed to connect to agent', e);
-      vscode.window.showErrorMessage(`Failed to connect: ${e.message}`);
+      await showErrorWithLogAction(`Failed to connect to ${agentName}: ${e.message}`);
     }
   });
 
@@ -149,19 +214,19 @@ export function activate(context: vscode.ExtensionContext): void {
     }
 
     try {
-      await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: `Starting new conversation with ${activeSession.agentDisplayName}...`,
-          cancellable: false,
-        },
-        async () => {
-          await sessionManager.newConversation();
+      await runWithConnectNotification(
+        `Starting new conversation with ${activeSession.agentDisplayName}...`,
+        'New conversation cancelled by user',
+        async (signal) => {
+          await sessionManager.newConversation({ signal });
         },
       );
     } catch (e: any) {
+      if (isCancellationError(e)) {
+        return;
+      }
       logError('Failed to start new conversation', e);
-      vscode.window.showErrorMessage(`Failed to start new conversation: ${e.message}`);
+      await showErrorWithLogAction(`Failed to start new conversation: ${e.message}`);
     }
   });
 
@@ -205,20 +270,23 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const agentName = activeSession.agentName;
     try {
-      await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: `Restarting ${activeSession.agentDisplayName}...`,
-          cancellable: false,
-        },
-        async () => {
+      await runWithConnectNotification(
+        `Restarting ${activeSession.agentDisplayName}...`,
+        `Restart of ${agentName} cancelled by user`,
+        async (signal) => {
           await sessionManager.disconnectAgent(agentName);
-          await sessionManager.connectToAgent(agentName);
+          if (signal.aborted) {
+            throw new vscode.CancellationError();
+          }
+          await sessionManager.connectToAgent(agentName, { signal });
         },
       );
       vscode.window.showInformationMessage(`Restarted ${agentName}`);
     } catch (e: any) {
-      vscode.window.showErrorMessage(`Failed to restart: ${e.message}`);
+      if (isCancellationError(e)) {
+        return;
+      }
+      await showErrorWithLogAction(`Failed to restart ${agentName}: ${e.message}`);
     }
   });
 
