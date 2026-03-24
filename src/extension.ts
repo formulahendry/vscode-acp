@@ -117,15 +117,18 @@ export function activate(context: vscode.ExtensionContext): void {
         {
           location: vscode.ProgressLocation.Notification,
           title: `Connecting to ${agentName}...`,
-          cancellable: false,
+          cancellable: true,
         },
-        async () => {
+        async (progress, token) => {
+          token.onCancellationRequested(() => {
+            log(`Connection to ${agentName} cancelled by user`);
+          });
           await sessionManager.connectToAgent(agentName!);
         },
       );
     } catch (e: any) {
       logError('Failed to connect to agent', e);
-      vscode.window.showErrorMessage(`Failed to connect: ${e.message}`);
+      vscode.window.showErrorMessage(`Failed to connect to ${agentName}: ${e.message}`);
     }
   });
 
@@ -153,9 +156,12 @@ export function activate(context: vscode.ExtensionContext): void {
         {
           location: vscode.ProgressLocation.Notification,
           title: `Starting new conversation with ${activeSession.agentDisplayName}...`,
-          cancellable: false,
+          cancellable: true,
         },
-        async () => {
+        async (progress, token) => {
+          token.onCancellationRequested(() => {
+            log(`New conversation cancelled by user`);
+          });
           await sessionManager.newConversation();
         },
       );
@@ -209,16 +215,19 @@ export function activate(context: vscode.ExtensionContext): void {
         {
           location: vscode.ProgressLocation.Notification,
           title: `Restarting ${activeSession.agentDisplayName}...`,
-          cancellable: false,
+          cancellable: true,
         },
-        async () => {
+        async (progress, token) => {
+          token.onCancellationRequested(() => {
+            log(`Restart of ${agentName} cancelled by user`);
+          });
           await sessionManager.disconnectAgent(agentName);
           await sessionManager.connectToAgent(agentName);
         },
       );
       vscode.window.showInformationMessage(`Restarted ${agentName}`);
     } catch (e: any) {
-      vscode.window.showErrorMessage(`Failed to restart: ${e.message}`);
+      vscode.window.showErrorMessage(`Failed to restart ${agentName}: ${e.message}`);
     }
   });
 

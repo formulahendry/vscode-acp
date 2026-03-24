@@ -13,6 +13,7 @@ interface Registry {
 }
 
 const REGISTRY_URL = 'https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json';
+const FETCH_TIMEOUT = 30000; // 30 seconds
 
 let cachedRegistry: Registry | null = null;
 let cacheTime = 0;
@@ -30,7 +31,12 @@ export async function fetchRegistry(): Promise<RegistryAgent[]> {
 
   try {
     log('Fetching ACP agent registry...');
-    const response = await fetch(REGISTRY_URL);
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => abortController.abort(), FETCH_TIMEOUT);
+
+    const response = await fetch(REGISTRY_URL, { signal: abortController.signal });
+    clearTimeout(timeoutId);
+
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
