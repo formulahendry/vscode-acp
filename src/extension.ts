@@ -35,30 +35,49 @@ export function activate(context: vscode.ExtensionContext): void {
     return error.name === 'AbortError' || /cancelled by user/i.test(error.message);
   };
 
-  const runWithCancelableProgress = async <T>(
+  const runWithConnectNotification = async <T>(
     title: string,
     onCancelLogMessage: string,
     task: (signal: AbortSignal) => Promise<T>,
   ): Promise<T> => {
-    return vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title,
-        cancellable: true,
-      },
-      async (_progress, token) => {
-        const abortController = new AbortController();
-        const cancellationPromise = new Promise<never>((_resolve, reject) => {
-          token.onCancellationRequested(() => {
-            log(onCancelLogMessage);
-            abortController.abort();
-            reject(new vscode.CancellationError());
-          });
-        });
+    const cancelAction = 'Cancel';
+    const abortController = new AbortController();
 
-        return Promise.race([task(abortController.signal), cancellationPromise]);
-      },
+    const settledTask = task(abortController.signal).then(
+      (value) => ({ status: 'fulfilled' as const, value }),
+      (reason) => ({ status: 'rejected' as const, reason }),
     );
+
+    const firstResult = await Promise.race([
+      settledTask.then(result => ({ type: 'task' as const, result })),
+      vscode.window.showInformationMessage(title, cancelAction)
+        .then(action => ({ type: 'action' as const, action })),
+    ]);
+
+    if (firstResult.type === 'task') {
+      if (firstResult.result.status === 'fulfilled') {
+        return firstResult.result.value;
+      }
+      throw firstResult.result.reason;
+    }
+
+    if (firstResult.action === cancelAction) {
+      log(onCancelLogMessage);
+      abortController.abort();
+
+      const finalResult = await settledTask;
+      if (finalResult.status === 'rejected' && !isCancellationError(finalResult.reason)) {
+        throw finalResult.reason;
+      }
+      throw new vscode.CancellationError();
+    }
+
+    // Dismiss/ignore notification: continue task and wait for completion.
+    const finalResult = await settledTask;
+    if (finalResult.status === 'fulfilled') {
+      return finalResult.value;
+    }
+    throw finalResult.reason;
   };
 
   // --- Telemetry ---
@@ -159,7 +178,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
 
     try {
-      await runWithCancelableProgress(
+      await runWithConnectNotification(
         `Connecting to ${agentName}...`,
         `Connection to ${agentName} cancelled by user`,
         async (signal) => {
@@ -195,7 +214,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
 
     try {
-      await runWithCancelableProgress(
+      await runWithConnectNotification(
         `Starting new conversation with ${activeSession.agentDisplayName}...`,
         'New conversation cancelled by user',
         async (signal) => {
@@ -251,7 +270,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const agentName = activeSession.agentName;
     try {
-      await runWithCancelableProgress(
+      await runWithConnectNotification(
         `Restarting ${activeSession.agentDisplayName}...`,
         `Restart of ${agentName} cancelled by user`,
         async (signal) => {
