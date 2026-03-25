@@ -46,6 +46,11 @@ export class SessionManager extends EventEmitter {
     super();
   }
 
+  private getWorkspaceCwd(): string {
+    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    return cwd || process.cwd();
+  }
+
   /**
    * Connect to an agent and start chatting.
    * Only one agent can be connected at a time — automatically disconnects
@@ -78,8 +83,10 @@ export class SessionManager extends EventEmitter {
     const connectStartTime = Date.now();
 
     try {
-      // Spawn the agent process
-      const agentInstance = this.agentManager.spawnAgent(agentName, config);
+      const workspaceCwd = this.getWorkspaceCwd();
+
+      // Spawn the agent process in workspace cwd
+      const agentInstance = this.agentManager.spawnAgent(agentName, config, workspaceCwd);
       const agentId = agentInstance.id;
 
       // Listen for agent errors/close
@@ -123,7 +130,7 @@ export class SessionManager extends EventEmitter {
       }
 
       // Create ACP session (with auth handling)
-      const sessionInfo = await this.createAcpSession(agentName, agentId, connInfo);
+      const sessionInfo = await this.createAcpSession(agentName, agentId, connInfo, workspaceCwd);
 
       this.sessions.set(sessionInfo.sessionId, sessionInfo);
       this.agentSessions.set(agentName, sessionInfo.sessionId);
@@ -190,8 +197,8 @@ export class SessionManager extends EventEmitter {
     agentName: string,
     agentId: string,
     connInfo: ConnectionInfo,
+    cwd: string,
   ): Promise<SessionInfo> {
-    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
     let sessionResponse: NewSessionResponse;
     try {
       sessionResponse = await connInfo.connection.newSession({
