@@ -48,7 +48,7 @@ export class SessionManager extends EventEmitter {
 
   private getWorkspaceCwd(): string {
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    return cwd || '/';
+    return cwd || process.cwd();
   }
 
   /**
