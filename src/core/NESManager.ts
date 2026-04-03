@@ -83,6 +83,7 @@ export class NESManager {
 
     try {
       const result = await this.connection.extMethod('nes/suggest', {
+        sessionId: this.nesSessionId,
         uri: document.uri.toString(),
         version: document.version,
         position: { line: position.line, character: position.character },
@@ -99,14 +100,14 @@ export class NESManager {
   accept(id: string): void {
     if (!this.connection) { return; }
     log(`NESManager: accept ${id}`);
-    void this.connection.extNotification('nes/accept', { id });
+    void this.connection.extNotification('nes/accept', { sessionId: this.nesSessionId, id });
   }
 
   /** Notify agent that user rejected/ignored a suggestion. */
   reject(id: string, reason: 'rejected' | 'ignored' | 'replaced'): void {
     if (!this.connection) { return; }
     log(`NESManager: reject ${id} (${reason})`);
-    void this.connection.extNotification('nes/reject', { id, reason });
+    void this.connection.extNotification('nes/reject', { sessionId: this.nesSessionId, id, reason });
   }
 
   /** Whether NES is currently active. */
@@ -170,6 +171,7 @@ export class NESManager {
         if (event.document.uri.scheme !== 'file') { return; }
         if (event.contentChanges.length === 0) { return; }
         void conn.extNotification('document/didChange', {
+          sessionId: this.nesSessionId,
           uri: event.document.uri.toString(),
           version: event.document.version,
           contentChanges: event.contentChanges.map(c => ({
@@ -185,6 +187,7 @@ export class NESManager {
       vscode.workspace.onDidCloseTextDocument(doc => {
         if (doc.uri.scheme !== 'file') { return; }
         void conn.extNotification('document/didClose', {
+          sessionId: this.nesSessionId,
           uri: doc.uri.toString(),
         });
       }),
@@ -192,11 +195,16 @@ export class NESManager {
       vscode.window.onDidChangeActiveTextEditor(editor => {
         if (!editor || editor.document.uri.scheme !== 'file') { return; }
         void conn.extNotification('document/didFocus', {
+          sessionId: this.nesSessionId,
           uri: editor.document.uri.toString(),
           version: editor.document.version,
           position: {
             line: editor.selection.active.line,
             character: editor.selection.active.character,
+          },
+          visibleRange: {
+            start: { line: editor.visibleRanges[0]?.start.line ?? 0, character: 0 },
+            end: { line: editor.visibleRanges[0]?.end.line ?? 0, character: 0 },
           },
         });
       }),
@@ -210,6 +218,7 @@ export class NESManager {
     for (const doc of vscode.workspace.textDocuments) {
       if (doc.uri.scheme === 'file') {
         void conn.extNotification('document/didOpen', {
+          sessionId: this.nesSessionId,
           uri: doc.uri.toString(),
           languageId: doc.languageId,
           version: doc.version,
@@ -222,11 +231,16 @@ export class NESManager {
     const activeEditor = vscode.window.activeTextEditor;
     if (activeEditor && activeEditor.document.uri.scheme === 'file') {
       void conn.extNotification('document/didFocus', {
+        sessionId: this.nesSessionId,
         uri: activeEditor.document.uri.toString(),
         version: activeEditor.document.version,
         position: {
           line: activeEditor.selection.active.line,
           character: activeEditor.selection.active.character,
+        },
+        visibleRange: {
+          start: { line: activeEditor.visibleRanges[0]?.start.line ?? 0, character: 0 },
+          end: { line: activeEditor.visibleRanges[0]?.end.line ?? 0, character: 0 },
         },
       });
     }
