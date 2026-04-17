@@ -303,15 +303,6 @@
             }
           }
         },
-        "acp.autoApprovePermissions": {
-          "type": "string",
-          "enum": [
-            "ask",
-            "allowAll"
-          ],
-          "default": "ask",
-          "description": "Automatically approve agent permission requests. 'ask' always prompts, 'allowAll' approves everything."
-        },
         "acp.defaultWorkingDirectory": {
           "type": "string",
           "default": "",
@@ -319,8 +310,38 @@
         },
         "acp.logTraffic": {
           "type": "boolean",
-          "default": true,
-          "description": "Log all ACP protocol traffic to the output channel."
+          "default": false,
+          "description": "Log ACP protocol traffic to the output channel. WARNING: may log sensitive data."
+        },
+        "acp.autoApprove.read": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "allow"
+          ],
+          "default": "ask",
+          "description": "Auto-approve file read and search operations.",
+          "scope": "application"
+        },
+        "acp.autoApprove.edit": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "allow"
+          ],
+          "default": "ask",
+          "description": "Auto-approve file write, delete, and move operations.",
+          "scope": "application"
+        },
+        "acp.autoApprove.execute": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "allow"
+          ],
+          "default": "ask",
+          "description": "Auto-approve terminal command execution.",
+          "scope": "application"
         }
       }
     }
@@ -339,6 +360,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.14.1",
     "@vscode/extension-telemetry": "^1.5.0",
+    "isomorphic-dompurify": "^2.36.0",
     "marked": "^15.0.0"
   },
   "devDependencies": {

@@ -33,7 +33,7 @@ export class ConnectionManager {
    * Create an ACP connection from a child process.
    * Sets up streams, creates connection, and performs initialization handshake.
    */
-  async connect(agentId: string, process: ChildProcess): Promise<ConnectionInfo> {
+  async connect(agentId: string, process: ChildProcess, workspaceCwd: string): Promise<ConnectionInfo> {
     if (!process.stdout || !process.stdin) {
       throw new Error('Agent process missing stdio streams');
     }
@@ -49,9 +49,9 @@ export class ConnectionManager {
     // Wrap the stream to intercept and log all ACP traffic
     const tappedStream = this.tapStream(stream);
 
-    // Create handlers
-    const fsHandler = new FileSystemHandler();
-    const terminalHandler = new TerminalHandler();
+    // Create handlers with workspace root for security boundary enforcement
+    const fsHandler = new FileSystemHandler(workspaceCwd);
+    const terminalHandler = new TerminalHandler(workspaceCwd);
     const permissionHandler = new PermissionHandler();
 
     // Create client implementation

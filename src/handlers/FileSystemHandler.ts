@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { log, logError } from '../utils/Logger';
+import { validatePath } from '../security/SecurityPolicy';
 
 import type {
   ReadTextFileRequest,
@@ -14,14 +15,17 @@ import type {
  */
 export class FileSystemHandler {
 
+  constructor(private readonly workspaceRoot: string) {}
+
   /**
    * Read a text file. Uses VS Code API to include unsaved editor content.
    */
   async readTextFile(params: ReadTextFileRequest): Promise<ReadTextFileResponse> {
+    const resolvedPath = validatePath(params.path, this.workspaceRoot);
     log(`readTextFile: ${params.path}`);
 
     try {
-      const uri = vscode.Uri.file(params.path);
+      const uri = vscode.Uri.file(resolvedPath);
 
       // Check if the file is open in an editor with unsaved changes
       const openDoc = vscode.workspace.textDocuments.find(
@@ -59,10 +63,11 @@ export class FileSystemHandler {
    * Opens the file in the editor so the user can see changes.
    */
   async writeTextFile(params: WriteTextFileRequest): Promise<WriteTextFileResponse> {
+    const resolvedPath = validatePath(params.path, this.workspaceRoot);
     log(`writeTextFile: ${params.path}`);
 
     try {
-      const uri = vscode.Uri.file(params.path);
+      const uri = vscode.Uri.file(resolvedPath);
       const encoded = Buffer.from(params.content, 'utf-8');
 
       await vscode.workspace.fs.writeFile(uri, encoded);

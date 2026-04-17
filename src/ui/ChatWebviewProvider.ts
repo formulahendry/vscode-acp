@@ -5,6 +5,8 @@ import { SessionUpdateHandler, SessionUpdateListener } from '../handlers/Session
 import type { SessionNotification } from '@agentclientprotocol/sdk';
 import { logError } from '../utils/Logger';
 import { sendEvent } from '../utils/TelemetryManager';
+import { ALLOWED_WEBVIEW_COMMANDS } from '../security/SecurityPolicy';
+import DOMPurify from 'isomorphic-dompurify';
 
 /**
  * WebviewViewProvider for the ACP chat sidebar.
@@ -40,7 +42,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
    */
   private renderMarkdown(text: string): string {
     try {
-      return marked.parse(text) as string;
+      return DOMPurify.sanitize(marked.parse(text) as string);
     } catch {
       return this.escapeHtml(text);
     }
@@ -85,7 +87,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           await this.handleSetModel(message.modelId);
           break;
         case 'executeCommand':
-          if (message.command) {
+          if (message.command && ALLOWED_WEBVIEW_COMMANDS.has(message.command)) {
             await vscode.commands.executeCommand(message.command);
           }
           break;

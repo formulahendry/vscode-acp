@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import { log, logError } from '../utils/Logger';
 import { sendEvent, sendError } from '../utils/TelemetryManager';
 import type { AgentConfigEntry } from '../config/AgentConfig';
+import { filterEnv, escapeWindowsArg } from '../security/SecurityPolicy';
 
 /**
  * Escape a single argument for safe inclusion in a shell command string.
@@ -83,9 +84,10 @@ export class AgentManager extends EventEmitter {
       if (process.platform === 'win32') {
         // On Windows, commands like npx are batch scripts (.cmd) that require
         // shell resolution via cmd.exe.
-        return spawn(config.command, config.args || [], {
+        const escapedArgs = (config.args || []).map(escapeWindowsArg);
+        return spawn(config.command, escapedArgs, {
           stdio: ['pipe', 'pipe', 'pipe'],
-          env: { ...process.env, ...(config.env || {}) },
+          env: { ...process.env, ...filterEnv(config.env || {}) },
           cwd: cwd || undefined,
           shell: true,
         });
@@ -102,7 +104,7 @@ export class AgentManager extends EventEmitter {
       sendEvent('agent/spawn/shell', { shell: shellName, useLoginFlag: String(useLoginFlag) });
       return spawn(shell, shellArgs, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, ...(config.env || {}) },
+        env: { ...process.env, ...filterEnv(config.env || {}) },
         cwd: cwd || undefined,
       });
     })();
