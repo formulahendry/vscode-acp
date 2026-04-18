@@ -149,7 +149,7 @@ Communication with agents uses the ACP protocol (JSON-RPC 2.0 over stdio).
 - [Agent Client Protocol](https://agentclientprotocol.com/)
 - [GitHub Repository](https://github.com/formulahendry/vscode-acp)
 
-### Related Projects
+## Related Projects
 
 - [ACP UI](https://github.com/formulahendry/acp-ui) — A modern, cross-platform desktop client for the Agent Client Protocol (ACP)
 - [WeChat ACP](https://github.com/formulahendry/wechat-acp) — Bridge WeChat chat messages to any ACP-compatible AI agent (Claude, Codex, Copilot, Qwen, Gemini, OpenCode and more)
