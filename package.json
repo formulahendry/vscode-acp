@@ -302,7 +302,7 @@
               "env": {}
             },
             "Kiro CLI": {
-              "command": "~/.local/bin/kiro-cli",
+              "command": "kiro-cli",
               "args": ["acp"],
               "env": {}
             }
