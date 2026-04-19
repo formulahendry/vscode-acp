@@ -19,7 +19,8 @@ function shellEscape(arg: string): string {
  * Expand tilde at the beginning of a path to home directory.
  * Tilde expansion only happens at the start of a word and before quoting.
  * Only expands ~ and ~/ to current user's home directory.
- * ~username patterns are returned unchanged (shell-dependent expansion).
+ * ~username patterns are left unchanged and are not expanded later once the
+ * argument is shell-escaped.
  */
 function expandTilde(path: string): string {
   if (path.startsWith('~/') || path === '~') {
