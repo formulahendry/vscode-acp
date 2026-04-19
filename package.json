@@ -301,7 +301,7 @@
               ],
               "env": {}
             },
-            "KiroCli": {
+            "Kiro CLI": {
               "command": "~/.local/bin/kiro-cli",
               "args": ["acp"],
               "env": {}
