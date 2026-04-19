@@ -3,3 +3,4 @@ dist/
 out/
 *.map
 .vscode-test/
+.DS_Store

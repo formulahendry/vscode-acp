@@ -90,7 +90,7 @@ export class AgentManager extends EventEmitter {
   /**
    * Spawn an agent as a child process with stdin/stdout piped.
    */
-  spawnAgent(name: string, config: AgentConfigEntry): AgentInstance {
+  spawnAgent(name: string, config: AgentConfigEntry, cwd?: string): AgentInstance {
     const id = `agent_${this.nextId++}`;
     // Expand tilde in command path for logging and execution
     const expandedCommand = expandTilde(config.command);
@@ -107,6 +107,7 @@ export class AgentManager extends EventEmitter {
         return spawn(expandedCommand, config.args || [], {
           stdio: ['pipe', 'pipe', 'pipe'],
           env: { ...process.env, ...(config.env || {}) },
+          cwd: cwd || undefined,
           shell: true,
         });
       }
@@ -123,6 +124,7 @@ export class AgentManager extends EventEmitter {
       return spawn(shell, shellArgs, {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...process.env, ...(config.env || {}) },
+        cwd: cwd || undefined,
       });
     })();
 
