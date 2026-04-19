@@ -1,7 +1,6 @@
 import { spawn, ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
-import { homedir } from 'node:os';
 import { log, logError } from '../utils/Logger';
 import { sendEvent, sendError } from '../utils/TelemetryManager';
 import type { AgentConfigEntry } from '../config/AgentConfig';
@@ -13,20 +12,6 @@ import type { AgentConfigEntry } from '../config/AgentConfig';
 function shellEscape(arg: string): string {
   // Replace ' with '\'' (end quote, escaped quote, start quote)
   return `'${arg.replace(/'/g, "'\\''")}'`;
-}
-
-/**
- * Expand tilde at the beginning of a path to home directory.
- * Tilde expansion only happens at the start of a word and before quoting.
- * Only expands ~ and ~/ to current user's home directory.
- * ~username patterns are left unchanged and are not expanded later once the
- * argument is shell-escaped.
- */
-function expandTilde(path: string): string {
-  if (path.startsWith('~/') || path === '~') {
-    return path.replace('~', homedir());
-  }
-  return path;
 }
 
 /**
@@ -92,19 +77,13 @@ export class AgentManager extends EventEmitter {
    */
   spawnAgent(name: string, config: AgentConfigEntry, cwd?: string): AgentInstance {
     const id = `agent_${this.nextId++}`;
-    // Expand tilde in command path for logging and execution
-    const expandedCommand = expandTilde(config.command);
-    if (expandedCommand !== config.command) {
-      log(`Spawning agent "${name}" (${id}): ${config.command} -> ${expandedCommand} ${(config.args || []).join(' ')}`);
-    } else {
-      log(`Spawning agent "${name}" (${id}): ${config.command} ${(config.args || []).join(' ')}`);
-    }
+    log(`Spawning agent "${name}" (${id}): ${config.command} ${(config.args || []).join(' ')}`);
 
     const child = (() => {
       if (process.platform === 'win32') {
         // On Windows, commands like npx are batch scripts (.cmd) that require
         // shell resolution via cmd.exe.
-        return spawn(expandedCommand, config.args || [], {
+        return spawn(config.command, config.args || [], {
           stdio: ['pipe', 'pipe', 'pipe'],
           env: { ...process.env, ...(config.env || {}) },
           cwd: cwd || undefined,
@@ -115,7 +94,7 @@ export class AgentManager extends EventEmitter {
       // On macOS/Linux, use the user's login shell so that PATH includes
       // nvm, Homebrew, and other user-installed tool directories.
       const { shell, useLoginFlag } = resolveUnixShell();
-      const commandStr = [expandedCommand, ...(config.args || [])].map(shellEscape).join(' ');
+      const commandStr = [config.command, ...(config.args || [])].map(shellEscape).join(' ');
       const shellArgs = useLoginFlag ? ['-l', '-c', commandStr] : ['-c', commandStr];
 
       log(`Using shell: ${shell} ${shellArgs.join(' ')}`);
