@@ -47,7 +47,7 @@ The extension comes with default configurations for:
 | Codex CLI | `npx @zed-industries/codex-acp@latest` |
 | OpenCode | `npx opencode-ai@latest acp` |
 | OpenClaw | `npx openclaw acp` |
-| KiroCli | `~/.local/bin/kiro-cli acp` |
+| Kiro CLI | `~/.local/bin/kiro-cli acp` |
 
 You can add custom agent configurations in settings.
 
