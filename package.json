@@ -301,6 +301,11 @@
               ],
               "env": {}
             },
+            "Kiro CLI": {
+              "command": "kiro-cli",
+              "args": ["acp"],
+              "env": {}
+            },
             "Hermes Agent": {
               "command": "hermes",
               "args": [
