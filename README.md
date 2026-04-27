@@ -59,9 +59,11 @@ You can add custom agent configurations in settings.
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `acp.agents` | *(11 agents)* | Agent configurations. Each key is the agent name, value has `command`, `args`, and `env`. |
-| `acp.autoApprovePermissions` | `ask` | How agent permission requests are handled: `ask` or `allowAll`. |
-| `acp.defaultWorkingDirectory` | `""` | Default working directory for agent sessions. Empty uses current workspace. |
-| `acp.logTraffic` | `true` | Log all ACP protocol traffic to the ACP Traffic output channel. |
+| `acp.autoApprove.read` | `ask` | Auto-approve file read, search, and fetch operations. `allow` skips the permission prompt for these tools. |
+| `acp.autoApprove.edit` | `ask` | Auto-approve file write, move, and delete operations. `allow` skips the permission prompt for these tools. |
+| `acp.autoApprove.execute` | `ask` | Auto-approve terminal command execution. `allow` skips the permission prompt for terminal tools. |
+| `acp.defaultWorkingDirectory` | `""` | Application-scoped default working directory for agent sessions. Empty uses the current workspace folder. |
+| `acp.logTraffic` | `false` | Application-scoped ACP traffic logging. Disabled by default because protocol payloads may contain sensitive data. |
 
 ## Commands
 

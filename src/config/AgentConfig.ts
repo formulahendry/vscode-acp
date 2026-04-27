@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from '../utils/Logger';
 
 /**
  * Configuration for a single ACP agent.
@@ -16,12 +17,25 @@ export interface AgentConfigEntry {
 
 /**
  * Read agent configurations from VS Code settings.
- * Returns a map of agent name → config.
+ * Warns if workspace-level overrides are detected (supply-chain risk).
  */
 export function getAgentConfigs(): Record<string, AgentConfigEntry> {
   const config = vscode.workspace.getConfiguration('acp');
-  const agents = config.get<Record<string, AgentConfigEntry>>('agents', {});
-  return agents;
+  const inspect = config.inspect<Record<string, AgentConfigEntry>>('agents');
+
+  if ((inspect?.workspaceValue || inspect?.workspaceFolderValue) && !isWorkspaceTrusted()) {
+    log('WARNING: Workspace-level agent configs detected but workspace is not trusted — ignoring');
+    return inspect.globalValue ?? inspect.defaultValue ?? {};
+  }
+
+  return config.get<Record<string, AgentConfigEntry>>('agents', {});
+}
+
+/**
+ * Check if the current workspace is trusted via VS Code's workspace trust API.
+ */
+function isWorkspaceTrusted(): boolean {
+  return vscode.workspace.isTrusted;
 }
 
 /**

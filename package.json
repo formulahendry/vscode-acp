@@ -303,7 +303,9 @@
             },
             "Kiro CLI": {
               "command": "kiro-cli",
-              "args": ["acp"],
+              "args": [
+                "acp"
+              ],
               "env": {}
             },
             "Hermes Agent": {
@@ -315,24 +317,47 @@
             }
           }
         },
-        "acp.autoApprovePermissions": {
+        "acp.autoApprove.read": {
           "type": "string",
           "enum": [
             "ask",
-            "allowAll"
+            "allow"
           ],
           "default": "ask",
-          "description": "Automatically approve agent permission requests. 'ask' always prompts, 'allowAll' approves everything."
+          "description": "Auto-approve file read and search operations.",
+          "scope": "application"
+        },
+        "acp.autoApprove.edit": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "allow"
+          ],
+          "default": "ask",
+          "description": "Auto-approve file write, delete, and move operations.",
+          "scope": "application"
+        },
+        "acp.autoApprove.execute": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "allow"
+          ],
+          "default": "ask",
+          "description": "Auto-approve terminal command execution.",
+          "scope": "application"
         },
         "acp.defaultWorkingDirectory": {
           "type": "string",
           "default": "",
-          "description": "Default working directory for agent sessions. Leave empty to use the current workspace folder."
+          "description": "Default working directory for agent sessions. Leave empty to use the current workspace folder.",
+          "scope": "application"
         },
         "acp.logTraffic": {
           "type": "boolean",
-          "default": true,
-          "description": "Log all ACP protocol traffic to the output channel."
+          "default": false,
+          "description": "Log ACP protocol traffic to the output channel. WARNING: may log sensitive data.",
+          "scope": "application"
         }
       }
     }
@@ -350,12 +375,15 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.14.1",
+    "@microsoft/applicationinsights-common": "^3.3.10",
     "@vscode/extension-telemetry": "^1.5.0",
-    "marked": "^15.0.0"
+    "marked": "^15.0.0",
+    "sanitize-html": "^2.17.0"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.6",
     "@types/node": "^20.0.0",
+    "@types/sanitize-html": "^2.16.0",
     "@types/vscode": "^1.85.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
