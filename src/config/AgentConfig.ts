@@ -23,7 +23,7 @@ export function getAgentConfigs(): Record<string, AgentConfigEntry> {
   const config = vscode.workspace.getConfiguration('acp');
   const inspect = config.inspect<Record<string, AgentConfigEntry>>('agents');
 
-  if (inspect?.workspaceValue && !isWorkspaceTrusted()) {
+  if ((inspect?.workspaceValue || inspect?.workspaceFolderValue) && !isWorkspaceTrusted()) {
     log('WARNING: Workspace-level agent configs detected but workspace is not trusted — ignoring');
     return inspect.globalValue ?? inspect.defaultValue ?? {};
   }

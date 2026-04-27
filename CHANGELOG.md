@@ -4,6 +4,24 @@ All notable changes to the "vscode-acp" extension will be documented in this fil
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.1.6] - 2026-04-20
+
+### Added
+- **Kiro CLI**: Added [Kiro CLI](https://kiro.dev/docs/cli/acp/) as a pre-configured agent (`kiro-cli acp`).
+
+## [0.1.5] - 2026-04-19
+
+### Added
+- **Hermes Agent**: Added [Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/acp) from Nous Research as a pre-configured agent (`hermes acp`).
+
+## [0.1.4] - 2026-04-18
+
+### Added
+- GitHub Actions workflow to publish the extension to both Visual Studio Marketplace and Open VSX Registry
+
+### Fixed
+- Pass workspace `cwd` when spawning agent processes, with a fallback to the process working directory
+
 ## [0.1.3] - 2026-03-01
 
 ### Added

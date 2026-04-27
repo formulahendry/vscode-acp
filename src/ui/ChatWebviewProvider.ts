@@ -6,7 +6,7 @@ import type { SessionNotification } from '@agentclientprotocol/sdk';
 import { logError } from '../utils/Logger';
 import { sendEvent } from '../utils/TelemetryManager';
 import { ALLOWED_WEBVIEW_COMMANDS } from '../security/SecurityPolicy';
-import DOMPurify from 'isomorphic-dompurify';
+import sanitizeHtml from 'sanitize-html';
 
 /**
  * WebviewViewProvider for the ACP chat sidebar.
@@ -42,7 +42,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
    */
   private renderMarkdown(text: string): string {
     try {
-      return DOMPurify.sanitize(marked.parse(text) as string);
+      return sanitizeHtml(marked.parse(text) as string);
     } catch {
       return this.escapeHtml(text);
     }

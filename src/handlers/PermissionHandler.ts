@@ -18,7 +18,7 @@ export class PermissionHandler {
     let resolve!: (v: RequestPermissionResponse) => void;
     const result = new Promise<RequestPermissionResponse>(r => { resolve = r; });
 
-    this.queue = this.queue.then(async () => {
+    this.queue = this.queue.catch(() => undefined).then(async () => {
       try {
         resolve(await this.handlePermission(params));
       } catch (err) {

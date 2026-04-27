@@ -1,18 +1,46 @@
 import * as path from 'node:path';
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 
 const ENV_DENYLIST = new Set([
   'PATH', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'DYLD_INSERT_LIBRARIES',
   'DYLD_LIBRARY_PATH', 'NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE', 'NODE_PATH',
 ]);
 
+function isWithinRoot(rootPath: string, targetPath: string): boolean {
+  const relativePath = path.relative(rootPath, targetPath);
+  return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
+}
+
+function findExistingAncestor(targetPath: string): string {
+  let currentPath = targetPath;
+
+  while (!existsSync(currentPath)) {
+    const parentPath = path.dirname(currentPath);
+    if (parentPath === currentPath) {
+      break;
+    }
+    currentPath = parentPath;
+  }
+
+  return currentPath;
+}
+
 export function validatePath(filePath: string, workspaceRoot: string): string {
-  const resolved = realpathSync(path.resolve(workspaceRoot, filePath));
-  const root = realpathSync(workspaceRoot);
-  if (!resolved.startsWith(root + path.sep) && resolved !== root) {
+  const rootPath = path.resolve(workspaceRoot);
+  const resolvedPath = path.resolve(rootPath, filePath);
+
+  if (!isWithinRoot(rootPath, resolvedPath)) {
     throw new Error(`Path escapes workspace boundary: ${filePath}`);
   }
-  return resolved;
+
+  const rootRealPath = realpathSync(rootPath);
+  const existingPath = findExistingAncestor(resolvedPath);
+  const existingRealPath = realpathSync(existingPath);
+  if (!isWithinRoot(rootRealPath, existingRealPath)) {
+    throw new Error(`Path escapes workspace boundary: ${filePath}`);
+  }
+
+  return existsSync(resolvedPath) ? realpathSync(resolvedPath) : resolvedPath;
 }
 
 export function filterEnv(agentEnv: Record<string, string>): Record<string, string> {
@@ -33,11 +61,18 @@ export const ALLOWED_WEBVIEW_COMMANDS: ReadonlySet<string> = new Set([
   'acp.disconnectAgent', 'acp.newConversation', 'acp.restartAgent',
 ]);
 
-export const REDACT_PATTERNS: RegExp[] = [
-  /(?:api[_-]?key|apikey|token|secret|password|passwd|authorization|bearer)\s*[:=]\s*\S+/gi,
-  /(?:sk|pk|key|pat|ghp|gho|ghu|ghs|ghr|glpat|xox[bpas])-[A-Za-z0-9_\-]{10,}/g,
-];
-
 export function redactSensitive(text: string): string {
-  return REDACT_PATTERNS.reduce((t, re) => t.replace(re, '[REDACTED]'), text);
+  return text
+    .replace(
+      /("?(?:api[_-]?key|apikey|token|secret|password|passwd|authorization|bearer)"?\s*[:=]\s*")([^"]*)(")/gi,
+      '$1[REDACTED]$3',
+    )
+    .replace(
+      /((?:api[_-]?key|apikey|token|secret|password|passwd|authorization|bearer)\s*[:=]\s*)(\S+)/gi,
+      '$1[REDACTED]',
+    )
+    .replace(
+      /\b(?:gh[pousr]_[A-Za-z0-9_]{10,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_\-]{10,}|xox[baprs]-[A-Za-z0-9\-]{10,}|(?:sk|pk)_[A-Za-z0-9_\-]{10,})\b/g,
+      '[REDACTED]',
+    );
 }

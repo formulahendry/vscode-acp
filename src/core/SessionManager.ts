@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { EventEmitter } from 'node:events';
 
@@ -47,9 +48,33 @@ export class SessionManager extends EventEmitter {
   }
 
   private getWorkspaceCwd(): string {
-    // PR#6: explicit setting > workspace folder > process cwd
-    const configCwd = vscode.workspace.getConfiguration('acp').get<string>('defaultWorkingDirectory', '');
-    return configCwd || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    const defaultWorkspaceCwd = workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+    const config = vscode.workspace.getConfiguration('acp');
+    const inspect = config.inspect<string>('defaultWorkingDirectory');
+    const configCwd = config.get<string>('defaultWorkingDirectory', '').trim();
+
+    if (!configCwd) {
+      return defaultWorkspaceCwd;
+    }
+
+    if (!vscode.workspace.isTrusted && (inspect?.workspaceValue || inspect?.workspaceFolderValue)) {
+      log('Ignoring workspace-scoped defaultWorkingDirectory in untrusted workspace');
+      return defaultWorkspaceCwd;
+    }
+
+    const candidate = path.resolve(defaultWorkspaceCwd, configCwd);
+    const isWithinWorkspace = workspaceFolders?.some((folder) => {
+      const relativePath = path.relative(folder.uri.fsPath, candidate);
+      return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
+    }) ?? false;
+
+    if (!isWithinWorkspace) {
+      log(`Ignoring defaultWorkingDirectory outside workspace: ${configCwd}`);
+      return defaultWorkspaceCwd;
+    }
+
+    return candidate;
   }
 
   /**
