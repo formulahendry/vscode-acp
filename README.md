@@ -49,6 +49,7 @@ The extension comes with default configurations for:
 | Codex CLI | `npx @zed-industries/codex-acp@latest` |
 | OpenCode | `npx opencode-ai@latest acp` |
 | OpenClaw | `npx openclaw acp` |
+| [openHarness](https://github.com/zhijiewong/openharness) | `npx @zhijiewang/openharness@latest acp` |
 | [Kiro CLI](https://kiro.dev/docs/cli/acp/) | `kiro-cli acp` |
 | [Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/acp) | `hermes acp` |
 
