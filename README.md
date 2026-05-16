@@ -8,10 +8,12 @@ A [Visual Studio Code extension](https://marketplace.visualstudio.com/items?item
 
 - **Multi-Agent Support**: Connect to 11 pre-configured ACP agents or add your own
 - **Single-Agent Focus**: One agent active at a time — seamlessly switch between agents
+- **Per-Agent Session List**: Each agent in the Agents view is expandable into its previous sessions. Click a session to restore its history in the chat. Backed by `session/list` when the agent supports it, or by a local per-workspace cache otherwise.
+- **Session Config Options**: Dynamic per-session selectors (mode, model, reasoning level, …) advertised by the agent are rendered automatically in the composer toolbar.
 - **Interactive Chat**: Built-in chat panel with Markdown rendering, inline tool call display, and collapsible tool sections
 - **Thinking Display**: See agent reasoning in a collapsible block with streaming animation and elapsed time
 - **Slash Commands**: Autocomplete popup for agent-provided commands with keyboard navigation
-- **Mode & Model Picker**: Switch agent modes and models directly from the chat toolbar
+- **Mode & Model Picker**: Switch agent modes and models directly from the chat toolbar (kept for agents that haven't migrated to Session Config Options yet)
 - **File System Integration**: Agents can read and write files in your workspace
 - **Terminal Execution**: Agents can run commands with terminal output display
 - **Permission Management**: Configurable auto-approve policies for agent actions
@@ -80,6 +82,7 @@ All commands are accessible via the Command Palette (`Ctrl+Shift+P`):
 | `ACP: Remove Agent` | Remove an agent configuration |
 | `ACP: Set Agent Mode` | Change the agent's operating mode |
 | `ACP: Set Agent Model` | Change the agent's model |
+| `ACP: Refresh Sessions` | Re-fetch the session list for an agent (also on the agent's right-click menu) |
 | `ACP: Show Log` | Open the ACP Client log output channel |
 | `ACP: Show Protocol Traffic` | Open the ACP Traffic output channel |
 | `ACP: Browse Agent Registry` | Browse the ACP agent registry |

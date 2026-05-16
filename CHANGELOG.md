@@ -4,6 +4,27 @@ All notable changes to the "vscode-acp" extension will be documented in this fil
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.2.0] - 2026-05-16
+
+### Added
+- **Session list in the Agents view**: each agent row is now expandable, revealing previous sessions for that agent. Clicking a session restores its history in the chat view.
+  - Uses `session/list` when the agent supports it (full source of truth, with cursor pagination).
+  - Falls back to a local, per-workspace session cache for agents that support `session/load` / `session/resume` but not `session/list` — captures `sessionId`, title (from `session_info_update`), first prompt, and timestamps.
+  - Opening a session uses `session/load` (replays history into the chat) when supported, otherwise `session/resume`.
+  - Right-click on a session: **Copy Session ID**. On a locally-cached session: **Forget Session**. On an agent: **Refresh Sessions**.
+  - Agents that advertise none of `list` / `load` / `resume` show as a non-expandable leaf, matching prior behavior.
+- **Session Config Options** (ACP): generic per-session selector(s) advertised by the agent (e.g. modes, models, thought levels). Pickers are rendered dynamically in the chat composer; the legacy Mode / Model pickers remain as a fallback for agents that haven't migrated yet.
+- New command `ACP: Refresh Sessions` (also available via right-click on an agent).
+
+### Changed
+- Mode / Model picker dropdowns now show option descriptions in a floating hover tooltip on the side, instead of stacking them inline. Long names display in full, and the dropdown grows responsively with the panel width.
+- Bumped `@agentclientprotocol/sdk` from `^0.14.1` to `^0.21.1`. Migrated `unstable_listSessions` / `unstable_resumeSession` to their stable equivalents.
+
+### Fixed
+- Agent / model picker labels no longer truncate at 140 px — names display fully and pickers wrap to a second row when the panel is narrow ([#36](https://github.com/formulahendry/vscode-acp/issues/36)).
+- Slash-command autocomplete now appears reliably when the agent advertises commands. Notifications like `available_commands_update` that arrive during session creation are persisted on the session even before `activeSessionId` is set.
+- Per-session state (config options, available commands, title) carries forward correctly when the active session is set after the notification arrives.
+
 ## [0.1.7] - 2026-05-10
 
 ### Changed
