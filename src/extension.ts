@@ -5,6 +5,7 @@ import { ConnectionManager } from './core/ConnectionManager';
 import { SessionManager } from './core/SessionManager';
 import { SessionHistoryStore } from './core/SessionHistoryStore';
 import { SessionUpdateHandler } from './handlers/SessionUpdateHandler';
+import { DiffPreviewHandler } from './handlers/DiffPreviewHandler';
 import { SessionTreeProvider } from './ui/SessionTreeProvider';
 import { StatusBarManager } from './ui/StatusBarManager';
 import { ChatWebviewProvider } from './ui/ChatWebviewProvider';
@@ -22,6 +23,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // --- Core services ---
   const sessionUpdateHandler = new SessionUpdateHandler();
+  const diffPreviewHandler = new DiffPreviewHandler();
+  sessionUpdateHandler.addListener(diffPreviewHandler.listener);
   const agentManager = new AgentManager();
   const connectionManager = new ConnectionManager(sessionUpdateHandler);
   const sessionManager = new SessionManager(
@@ -522,6 +525,7 @@ export function activate(context: vscode.ExtensionContext): void {
     {
       dispose: () => {
         sessionManager.dispose();
+        diffPreviewHandler.dispose();
         sessionUpdateHandler.dispose();
         chatWebviewProvider.dispose();
         sessionTreeProvider.dispose();
