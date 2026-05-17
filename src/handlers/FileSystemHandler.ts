@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as os from 'os';
 import { log, logError } from '../utils/Logger';
 
 import type {
@@ -56,20 +58,48 @@ export class FileSystemHandler {
 
   /**
    * Write a text file. Creates parent directories if needed.
-   * Opens the file in the editor so the user can see changes.
+   * Shows a diff view for existing files so the user can review changes.
    */
   async writeTextFile(params: WriteTextFileRequest): Promise<WriteTextFileResponse> {
     log(`writeTextFile: ${params.path}`);
 
     try {
       const uri = vscode.Uri.file(params.path);
-      const encoded = Buffer.from(params.content, 'utf-8');
+      const newContent = params.content;
+      const encoded = Buffer.from(newContent, 'utf-8');
+
+      // Read old content (if file exists) before overwriting
+      let oldContent: string | null = null;
+      try {
+        const oldRaw = await vscode.workspace.fs.readFile(uri);
+        oldContent = Buffer.from(oldRaw).toString('utf-8');
+      } catch {
+        // File doesn't exist yet — no diff needed
+      }
 
       await vscode.workspace.fs.writeFile(uri, encoded);
 
-      // Open the file in the editor so the user sees the change
-      const doc = await vscode.workspace.openTextDocument(uri);
-      await vscode.window.showTextDocument(doc, { preview: true, preserveFocus: true });
+      if (oldContent !== null && oldContent !== newContent) {
+        // Show diff: write old content to a temp file, then open vscode.diff
+        const tmpDir = path.join(os.tmpdir(), 'vscode-acp-diffs');
+        await vscode.workspace.fs.createDirectory(vscode.Uri.file(tmpDir));
+        const oldUri = vscode.Uri.file(
+          path.join(tmpDir, path.basename(params.path))
+        );
+        await vscode.workspace.fs.writeFile(oldUri, Buffer.from(oldContent, 'utf-8'));
+
+        await vscode.commands.executeCommand(
+          'vscode.diff',
+          oldUri,
+          uri,
+          `${path.basename(params.path)} (before → after)`
+        );
+      } else if (oldContent === null) {
+        // New file: open in editor
+        const doc = await vscode.workspace.openTextDocument(uri);
+        await vscode.window.showTextDocument(doc, { preview: true, preserveFocus: true });
+      }
+      // If oldContent === newContent, no change — do nothing
 
       return {};
     } catch (e) {
