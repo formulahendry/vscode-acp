@@ -44,6 +44,7 @@ The extension comes with default configurations for:
 | Claude Code | `npx @agentclientprotocol/claude-agent-acp@latest` |
 | Gemini CLI | `npx @google/gemini-cli@latest --experimental-acp` |
 | Qwen Code | `npx @qwen-code/qwen-code@latest --acp --experimental-skills` |
+| [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) | `reasonix acp` |
 | Auggie CLI | `npx @augmentcode/auggie@latest --acp` |
 | Qoder CLI | `npx @qoder-ai/qodercli@latest --acp` |
 | Codex CLI | `npx @zed-industries/codex-acp@latest` |
