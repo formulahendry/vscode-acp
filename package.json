@@ -313,6 +313,11 @@
               ],
               "env": {}
             },
+            "Reasonix": {
+              "command": "reasonix",
+              "args": ["acp"],
+              "env": {}
+            },
             "Auggie CLI": {
               "command": "npx",
               "args": [

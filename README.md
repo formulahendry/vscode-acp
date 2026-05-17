@@ -44,6 +44,7 @@ The extension comes with default configurations for:
 | Claude Code | `npx @agentclientprotocol/claude-agent-acp@latest` |
 | Gemini CLI | `npx @google/gemini-cli@latest --experimental-acp` |
 | Qwen Code | `npx @qwen-code/qwen-code@latest --acp --experimental-skills` |
+| [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) | `reasonix acp` |
 | Auggie CLI | `npx @augmentcode/auggie@latest --acp` |
 | Qoder CLI | `npx @qoder-ai/qodercli@latest --acp` |
 | Codex CLI | `npx @zed-industries/codex-acp@latest` |
@@ -95,6 +96,33 @@ All commands are accessible via the Command Palette (`Ctrl+Shift+P`):
 | `Escape` (when turn in progress) | Cancel Current Turn |
 
 ## Development
+
+### Testing This Fork
+
+This branch is not published to the VS Code Marketplace. To test it, build and
+install a VSIX from this fork:
+
+```bash
+git clone https://github.com/yes999zc/vscode-acp.git
+cd vscode-acp
+git checkout add-reasonix-agent
+npm install
+npx vsce package --out acp-client-local.vsix
+code --install-extension acp-client-local.vsix --force
+```
+
+After installation, reload VS Code with `Developer: Reload Window`.
+
+To test Reasonix, make sure `reasonix` is installed and available on the PATH
+seen by VS Code:
+
+```bash
+reasonix --version
+```
+
+Then open the ACP Client panel, connect to `Reasonix`, and try a code-editing
+prompt. The extension should show tool calls in chat, follow edited files, and
+open a diff after edits complete.
 
 ### Prerequisites
 

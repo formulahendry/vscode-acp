@@ -4,6 +4,11 @@ All notable changes to the "vscode-acp" extension will be documented in this fil
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [Unreleased]
+
+### Added
+- Reasonix agent: `reasonix acp` (DeepSeek-native coding agent with cache-first loop).
+
 ## [0.2.0] - 2026-05-16
 
 ### Added
