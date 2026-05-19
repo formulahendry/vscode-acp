@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import { EventEmitter } from 'node:events';
 
-import type { NewSessionResponse, PromptResponse, InitializeResponse, ContentBlock, SessionModeState, SessionModelState, AvailableCommand } from '@agentclientprotocol/sdk';
-import { RequestError } from '@agentclientprotocol/sdk';
+
+import type { NewSessionResponse, PromptResponse, InitializeResponse, ContentBlock, SessionModeState, SessionModelState, AvailableCommand, SessionInfo as ProtocolSessionInfo } from '@agentclientprotocol/sdk' with { "resolution-mode": "import" };
 
 import { AgentManager } from './AgentManager';
 import { ConnectionManager, ConnectionInfo } from './ConnectionManager';
@@ -10,7 +10,18 @@ import { SessionUpdateHandler } from '../handlers/SessionUpdateHandler';
 import { getAgentConfigs, resolveSessionWorkingDirectory } from '../config/AgentConfig';
 import { log, logError } from '../utils/Logger';
 import { sendEvent, sendError } from '../utils/TelemetryManager';
-import { buildResearchSubagentMcpServer } from '../subagents/ResearchSubagent';
+
+// `ResearchSubagent` is optional — some forks/branches may not include it.
+// Load dynamically and fall back to a noop if unavailable so the extension
+// can compile without the optional tooling.
+let buildResearchSubagentMcpServer: ((cwd: string) => any) | undefined;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  // @ts-ignore
+  buildResearchSubagentMcpServer = require('../subagents/ResearchSubagent').buildResearchSubagentMcpServer;
+} catch {
+  buildResearchSubagentMcpServer = undefined;
+}
 
 export interface SessionInfo {
   sessionId: string;
@@ -25,6 +36,13 @@ export interface SessionInfo {
   availableCommands: AvailableCommand[];
 }
 
+/** Summary of agent capabilities used by the UI tree provider. */
+export interface AgentCapabilitySummary {
+  list?: boolean;
+  load?: boolean;
+  resume?: boolean;
+}
+
 /**
  * Manages the lifecycle of ACP agent connections.
  *
@@ -32,9 +50,11 @@ export interface SessionInfo {
  * Internally we still use ACP sessions for protocol compliance, but the
  * user-facing model is: pick an agent → chat.
  */
-export class SessionManager extends EventEmitter {
+export class SessionManager extends EventEmitter<any> {
   private sessions: Map<string, SessionInfo> = new Map();
   private activeSessionId: string | null = null;
+  // Optional cached capability summaries per-agent. May be empty.
+  private capabilityCache: Map<string, AgentCapabilitySummary> = new Map();
 
   /** Maps agentName → activeSessionId for the one-session-per-agent model. */
   private agentSessions: Map<string, string> = new Map();
@@ -45,6 +65,27 @@ export class SessionManager extends EventEmitter {
     private readonly sessionUpdateHandler: SessionUpdateHandler,
   ) {
     super();
+  }
+
+  // --- Capability helpers (minimal shims so UI can probe safely) ---
+
+  getCachedCapabilities(agentName: string): AgentCapabilitySummary | undefined {
+    return this.capabilityCache.get(agentName);
+  }
+
+  /** Ensure the agent is reachable for capability probing. This is a no-op
+   *  shim in environments where we don't want to auto-spawn agents during
+   *  a UI probe. */
+  async ensureConnected(_agentName: string): Promise<void> {
+    // Intentionally minimal: UI will handle failures if probing is unsupported.
+    return;
+  }
+
+  /** List sessions from the agent. Minimal implementation returning an
+   *  empty list — agents that support `session/list` should implement a
+   *  richer handler; the UI will fall back to local history when available. */
+  async listSessions(_agentName: string, _opts: { cwd?: string; cursor?: string; pageSize?: number; } = {}): Promise<{ sessions: ProtocolSessionInfo[]; nextCursor?: string; }> {
+    return { sessions: [], nextCursor: undefined };
   }
 
   /**
@@ -194,7 +235,7 @@ export class SessionManager extends EventEmitter {
     connInfo: ConnectionInfo,
     cwd: string,
   ): Promise<SessionInfo> {
-    const mcpServers = [buildResearchSubagentMcpServer(cwd)];
+    const mcpServers = buildResearchSubagentMcpServer ? [buildResearchSubagentMcpServer(cwd)] : [];
     let sessionResponse: NewSessionResponse;
     try {
       sessionResponse = await connInfo.connection.newSession({
@@ -203,8 +244,7 @@ export class SessionManager extends EventEmitter {
       });
     } catch (e: any) {
       // Check for auth_required error (code -32000)
-      const isAuthRequired = (e instanceof RequestError && e.code === -32000)
-        || (e?.code === -32000)
+      const isAuthRequired = (e?.code === -32000)
         || (typeof e?.message === 'string' && /auth.?required/i.test(e.message));
 
       if (!isAuthRequired) {

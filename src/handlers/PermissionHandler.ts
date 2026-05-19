@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { log } from '../utils/Logger';
 import { sendEvent } from '../utils/TelemetryManager';
 
-import type { RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
+import type { RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk' with { "resolution-mode": "import" };
 
 /**
  * Handles ACP permission requests from agents.

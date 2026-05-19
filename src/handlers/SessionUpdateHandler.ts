@@ -1,6 +1,6 @@
 import { log } from '../utils/Logger';
 
-import type { SessionNotification } from '@agentclientprotocol/sdk';
+import type { SessionNotification } from '@agentclientprotocol/sdk' with { "resolution-mode": "import" };
 
 export type SessionUpdateListener = (update: SessionNotification) => void;
 

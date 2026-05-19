@@ -1,6 +1,6 @@
 import { spawn, ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { EventEmitter } from 'node:events';
+import { EventEmitter } from 'events';
 import { log, logError } from '../utils/Logger';
 import { sendEvent, sendError } from '../utils/TelemetryManager';
 import type { AgentConfigEntry } from '../config/AgentConfig';
@@ -68,7 +68,7 @@ export interface AgentInstance {
 /**
  * Manages spawning and killing ACP agent child processes.
  */
-export class AgentManager extends EventEmitter {
+export class AgentManager extends EventEmitter<any> {
   private agents: Map<string, AgentInstance> = new Map();
   private nextId = 1;
 

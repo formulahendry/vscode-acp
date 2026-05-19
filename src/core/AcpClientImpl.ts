@@ -18,7 +18,7 @@ import type {
   KillTerminalResponse,
   ReleaseTerminalRequest,
   ReleaseTerminalResponse,
-} from '@agentclientprotocol/sdk';
+} from '@agentclientprotocol/sdk' with { "resolution-mode": "import" };
 
 import { FileSystemHandler } from '../handlers/FileSystemHandler';
 import { TerminalHandler } from '../handlers/TerminalHandler';

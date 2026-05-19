@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { SessionInfo as ProtocolSessionInfo } from '@agentclientprotocol/sdk';
+import type { SessionInfo as ProtocolSessionInfo } from '@agentclientprotocol/sdk' with { "resolution-mode": "import" };
 import { SessionManager, AgentCapabilitySummary } from '../core/SessionManager';
 import { SessionHistoryStore, PersistedSessionEntry } from '../core/SessionHistoryStore';
 import { getAgentNames } from '../config/AgentConfig';

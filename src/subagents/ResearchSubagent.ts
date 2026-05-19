@@ -1,8 +1,6 @@
 import { Buffer } from 'node:buffer';
 import path from 'node:path';
 
-import { PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
-
 import {
   getAgentConfig,
   getResearchSubAgentConfig,
@@ -24,6 +22,7 @@ export interface LocalMcpServerStdio {
 const TOOL_NAME = 'call_research_subagent';
 const MCP_SERVER_NAME = 'acp-research-subagent';
 const MCP_SERVER_VERSION = '0.1.0';
+const ACP_PROTOCOL_VERSION = 1;
 const MCP_SCRIPT_ENV = 'ACP_RESEARCH_MCP_SCRIPT_BASE64';
 const RESEARCH_TIMEOUT_MS = 110_000;
 // Final output contract: the sub-agent must write a single JSON object
@@ -40,7 +39,7 @@ export function buildResearchSubagentMcpServer(cwd: string): LocalMcpServerStdio
     env: [
       { name: 'ACP_RESEARCH_TOOL_NAME', value: TOOL_NAME },
       { name: 'ACP_RESEARCH_TOOL_VERSION', value: MCP_SERVER_VERSION },
-      { name: 'ACP_RESEARCH_ACP_PROTOCOL_VERSION', value: String(PROTOCOL_VERSION) },
+      { name: 'ACP_RESEARCH_ACP_PROTOCOL_VERSION', value: String(ACP_PROTOCOL_VERSION) },
       { name: 'ACP_RESEARCH_SESSION_CWD', value: cwd },
       { name: 'ACP_RESEARCH_TIMEOUT_MS', value: String(RESEARCH_TIMEOUT_MS) },
       {

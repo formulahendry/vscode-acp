@@ -12,7 +12,7 @@ import type {
   KillTerminalResponse,
   ReleaseTerminalRequest,
   ReleaseTerminalResponse,
-} from '@agentclientprotocol/sdk';
+} from '@agentclientprotocol/sdk' with { "resolution-mode": "import" };
 
 import { spawn, ChildProcess } from 'node:child_process';
 

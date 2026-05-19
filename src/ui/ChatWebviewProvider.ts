@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { marked } from 'marked';
-import type { SessionNotification } from '@agentclientprotocol/sdk';
+import type { SessionNotification } from '@agentclientprotocol/sdk' with { "resolution-mode": "import" };
 
 import { SessionManager } from '../core/SessionManager';
 import { SessionUpdateHandler, SessionUpdateListener } from '../handlers/SessionUpdateHandler';

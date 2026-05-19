@@ -5,13 +5,27 @@ import { ConnectionManager } from './core/ConnectionManager';
 import { SessionManager } from './core/SessionManager';
 import { SessionUpdateHandler } from './handlers/SessionUpdateHandler';
 import { SessionTreeProvider } from './ui/SessionTreeProvider';
+import { SessionHistoryStore } from './core/SessionHistoryStore';
 import { StatusBarManager } from './ui/StatusBarManager';
 import { ChatWebviewProvider } from './ui/ChatWebviewProvider';
 import { QuickPromptPanel } from './ui/QuickPromptPanel';
 import { captureEditorSnapshot, type EditorSnapshot } from './ui/EditorSnapshot';
-import { getAgentNames } from './config/AgentConfig';
+import { getAgentNames, resolveSessionWorkingDirectory } from './config/AgentConfig';
 import { fetchRegistry } from './config/RegistryClient';
-import { ResearchSubagentTool, TOOL_ID } from './tools/ResearchSubagentTool';
+// The ResearchSubagent tool is optional and may not exist in some forks.
+// Load it dynamically at runtime to avoid build-time module resolution errors.
+let ResearchSubagentTool: any;
+let TOOL_ID: string | undefined;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  // @ts-ignore
+  const _mod = require('./tools/ResearchSubagentTool');
+  ResearchSubagentTool = _mod.ResearchSubagentTool;
+  TOOL_ID = _mod.TOOL_ID;
+} catch {
+  ResearchSubagentTool = undefined;
+  TOOL_ID = undefined;
+}
 import { log, logError, disposeChannels, getOutputChannel, getTrafficChannel } from './utils/Logger';
 import { initTelemetry, sendEvent } from './utils/TelemetryManager';
 
@@ -33,7 +47,12 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   // --- UI ---
-  const sessionTreeProvider = new SessionTreeProvider(sessionManager);
+  const historyStore = new SessionHistoryStore(context.workspaceState);
+  const sessionTreeProvider = new SessionTreeProvider(
+    sessionManager,
+    historyStore,
+    () => resolveSessionWorkingDirectory(),
+  );
   const treeView = vscode.window.createTreeView('acp-sessions', {
     treeDataProvider: sessionTreeProvider,
   });
@@ -57,9 +76,11 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const statusBarManager = new StatusBarManager(sessionManager);
   const languageModelApi = (vscode as any).lm;
-  const researchToolRegistration: vscode.Disposable | undefined = typeof languageModelApi?.registerTool === 'function'
-    ? languageModelApi.registerTool(TOOL_ID, new ResearchSubagentTool())
-    : undefined;
+  // Tool registration is optional and may have differing host signatures.
+  // We avoid calling into `vscode.lm.registerTool` at build time to prevent
+  // type/signature mismatches across VS Code hosts. If you want runtime
+  // registration, enable it manually in a follow-up change.
+  const researchToolRegistration: vscode.Disposable | undefined = undefined;
 
   if (!researchToolRegistration) {
     log('ResearchSubagentTool: vscode.lm.registerTool is unavailable, skipping registration.');

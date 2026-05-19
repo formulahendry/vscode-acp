@@ -6,7 +6,7 @@ import type {
   ReadTextFileResponse,
   WriteTextFileRequest,
   WriteTextFileResponse,
-} from '@agentclientprotocol/sdk';
+} from '@agentclientprotocol/sdk' with { "resolution-mode": "import" };
 
 /**
  * Handles ACP file system requests using VS Code's workspace filesystem API.

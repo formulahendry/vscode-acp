@@ -1,6 +1,5 @@
-import { ClientSideConnection, ndJsonStream, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
-import type { Agent, InitializeResponse } from '@agentclientprotocol/sdk';
-import type { Stream } from '@agentclientprotocol/sdk/dist/stream.js';
+import type { ClientSideConnection, Agent, InitializeResponse } from '@agentclientprotocol/sdk' with { "resolution-mode": "import" };
+import type { Stream } from '@agentclientprotocol/sdk/dist/stream.js' with { "resolution-mode": "import" };
 import { ChildProcess } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
 
@@ -34,6 +33,8 @@ export class ConnectionManager {
    * Sets up streams, creates connection, and performs initialization handshake.
    */
   async connect(agentId: string, process: ChildProcess): Promise<ConnectionInfo> {
+    const { ClientSideConnection, ndJsonStream, PROTOCOL_VERSION } = await import('@agentclientprotocol/sdk');
+
     if (!process.stdout || !process.stdin) {
       throw new Error('Agent process missing stdio streams');
     }
