@@ -1,6 +1,8 @@
 .vscode/**
 .vscode-test/**
+webview/**
 src/**
+!src/subagents/research_mcp.js
 out/**
 node_modules/**
 .gitignore

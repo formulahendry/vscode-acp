@@ -29,7 +29,9 @@
     "coding agent",
     "copilot"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -79,6 +81,10 @@
       {
         "command": "acp.sendPrompt",
         "title": "ACP: Send Prompt"
+      },
+      {
+        "command": "acp.quickPrompt",
+        "title": "ACP: Quick Prompt"
       },
       {
         "command": "acp.cancelTurn",
@@ -269,9 +275,50 @@
         "mac": "cmd+shift+a"
       },
       {
+        "command": "acp.quickPrompt",
+        "key": "ctrl+alt+p",
+        "mac": "cmd+alt+p"
+      },
+      {
         "command": "acp.cancelTurn",
         "key": "escape",
         "when": "acp.turnInProgress"
+      }
+    ],
+    "languageModelTools": [
+      {
+        "name": "acp_call_research_subagent",
+        "tags": [
+          "research",
+          "acp",
+          "subagent"
+        ],
+        "toolReferenceName": "research",
+        "displayName": "ACP Research Sub-Agent",
+        "modelDescription": "Delegate repository research to a hidden ACP sub-agent. Use this tool by default for investigation, exploration, codebase discovery, architecture tracing, documentation lookup, and other multi-file search or synthesis tasks. Prefer it over direct local inspection unless the answer is obvious from the current context. Accepts a required query and an optional depth value of quick or thorough.",
+        "icon": "$(search)",
+        "userDescription": "Research a topic using an ACP sub-agent",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "The exact topic or question to investigate."
+            },
+            "depth": {
+              "type": "string",
+              "enum": [
+                "quick",
+                "thorough"
+              ],
+              "description": "Research depth. Defaults to quick."
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
       }
     ],
     "configuration": {
@@ -384,6 +431,11 @@
           "default": "",
           "description": "Default working directory for agent sessions. Leave empty to use the current workspace folder."
         },
+        "acp.subAgents.researchAgentName": {
+          "type": "string",
+          "default": "",
+          "description": "Agent name from acp.agents used by the hidden call_research_subagent MCP tool. Leave empty to expose the tool in error mode until configured."
+        },
         "acp.logTraffic": {
           "type": "boolean",
           "default": true,
@@ -397,7 +449,7 @@
     "compile": "webpack",
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool hidden-source-map",
-    "compile-tests": "tsc -p . --outDir out",
+    "compile-tests": "node -e \"require('node:fs').rmSync('out', { recursive: true, force: true })\" && tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "lint": "eslint src --max-warnings 0",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
@@ -417,6 +469,7 @@
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.4.1",
     "@vscode/vsce": "^3.7.1",
+    "copy-webpack-plugin": "^14.0.0",
     "eslint": "^9.0.0",
     "ts-loader": "^9.5.0",
     "typescript": "^5.5.0",
