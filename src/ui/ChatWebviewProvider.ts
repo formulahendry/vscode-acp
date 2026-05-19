@@ -84,6 +84,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         case 'setModel':
           await this.handleSetModel(message.modelId);
           break;
+        case 'setConfigOption':
+          await this.handleSetConfigOption(message.configId, message.value);
+          break;
         case 'executeCommand':
           if (message.command) {
             await vscode.commands.executeCommand(message.command);
@@ -115,18 +118,36 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
    * Forward session update to webview.
    */
   private handleSessionUpdate(update: SessionNotification): void {
-    // Only forward updates for the active session
+    const updateData = update.update as any;
+
+    // Persist session state BEFORE the active-session check. During session
+    // creation the agent can dispatch notifications (e.g.
+    // `available_commands_update`) before connectToAgent finishes setting
+    // `activeSessionId`. Without this, those updates would be dropped and
+    // the slash-command popup would never have commands to show.
+    if (updateData?.sessionUpdate === 'available_commands_update') {
+      this.sessionManager.applyAvailableCommands(
+        update.sessionId,
+        updateData.availableCommands || [],
+      );
+    }
+    if (updateData?.sessionUpdate === 'config_option_update') {
+      this.sessionManager.applyConfigOptions(
+        update.sessionId,
+        updateData.configOptions || [],
+      );
+    }
+    if (updateData?.sessionUpdate === 'session_info_update') {
+      this.sessionManager.applySessionInfoUpdate(update.sessionId, {
+        title: updateData.title,
+        updatedAt: updateData.updatedAt,
+      });
+    }
+
+    // Only forward to the webview if this is the active session — the
+    // webview only ever shows one session at a time.
     const activeId = this.sessionManager.getActiveSessionId();
     if (update.sessionId !== activeId) { return; }
-
-    // Persist available commands on session state
-    const updateData = update.update as any;
-    if (updateData?.sessionUpdate === 'available_commands_update') {
-      const session = this.sessionManager.getSession(update.sessionId);
-      if (session) {
-        session.availableCommands = updateData.availableCommands || [];
-      }
-    }
 
     this.postMessage({
       type: 'sessionUpdate',
@@ -154,6 +175,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       messageLength: text.length,
     });
 
+    // Record the first prompt for the history store (used as a label
+    // fallback when no title is supplied by the agent).
+    this.sessionManager.recordFirstPrompt(activeId, text);
+
     // Tell webview we're processing
     this.postMessage({ type: 'promptStart' });
 
@@ -166,6 +191,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         stopReason: response.stopReason,
         usage: (response as any).usage,
       });
+      this.sessionManager.touchHistory(activeId);
     } catch (e: any) {
       logError('Prompt failed', e);
       this.postMessage({
@@ -219,6 +245,30 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * Handle generic config-option change from webview picker
+   * (ACP "Session Config Options"). The agent returns the full
+   * configOptions state which we re-broadcast so any cascading
+   * changes are reflected in the UI.
+   */
+  private async handleSetConfigOption(configId: string, value: string): Promise<void> {
+    const activeId = this.sessionManager.getActiveSessionId();
+    if (!activeId || !configId) { return; }
+    try {
+      const options = await this.sessionManager.setConfigOption(activeId, configId, value);
+      this.postMessage({ type: 'configOptionsUpdate', configOptions: options });
+    } catch (e: any) {
+      logError('Failed to set config option', e);
+      this.postMessage({ type: 'error', message: `Failed to set ${configId}: ${e.message}` });
+      // Roll back optimistic update on the webview by replaying current state
+      const session = this.sessionManager.getSession(activeId);
+      this.postMessage({
+        type: 'configOptionsUpdate',
+        configOptions: session?.configOptions ?? null,
+      });
+    }
+  }
+
+  /**
    * Send current session state to the webview on load.
    */
   private sendCurrentState(): void {
@@ -230,9 +280,11 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       session: session ? {
         sessionId: session.sessionId,
         agentName: session.agentDisplayName,
+        title: session.title,
         cwd: session.cwd,
         modes: session.modes,
         models: session.models,
+        configOptions: session.configOptions,
         availableCommands: session.availableCommands,
       } : null,
     });
@@ -264,6 +316,32 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
    */
   notifyModelsUpdate(models: any): void {
     this.postMessage({ type: 'modelsUpdate', models });
+  }
+
+  /**
+   * Notify webview of session config-option state changes.
+   */
+  notifyConfigOptionsUpdate(configOptions: any): void {
+    this.postMessage({ type: 'configOptionsUpdate', configOptions });
+  }
+
+  /**
+   * Notify webview that a `session/load` replay is starting. The webview
+   * wipes any previously-displayed history, disables input, and shows a
+   * loading overlay until {@link notifyLoadSessionEnd} fires.
+   */
+  notifyLoadSessionStart(): void {
+    this.postMessage({ type: 'loadSessionStart' });
+  }
+
+  /** Notify webview that the active replay finished (success or failure). */
+  notifyLoadSessionEnd(ok: boolean): void {
+    this.postMessage({ type: 'loadSessionEnd', ok });
+  }
+
+  /** Notify webview that session title / metadata changed. */
+  notifySessionInfoUpdate(title: string | undefined | null): void {
+    this.postMessage({ type: 'sessionInfoUpdate', title: title ?? null });
   }
 
   /**
@@ -739,11 +817,14 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       gap: 4px;
       padding: 4px var(--container-padding) 0;
       flex-shrink: 0;
+      flex-wrap: wrap;
     }
 
     /* Picker wrapper — positioned relatively to anchor the dropdown */
     .picker-wrap {
       position: relative;
+      min-width: 0;
+      max-width: 100%;
     }
     .picker-wrap.hidden { display: none; }
 
@@ -761,7 +842,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       font-size: calc(var(--vscode-font-size) - 1px);
       cursor: pointer;
       white-space: nowrap;
-      max-width: 140px;
+      max-width: 100%;
+      min-width: 0;
       opacity: 0.8;
     }
     .picker-btn:hover {
@@ -775,6 +857,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     .picker-btn .picker-label {
       overflow: hidden;
       text-overflow: ellipsis;
+      min-width: 0;
     }
     .picker-btn .picker-chevron {
       flex-shrink: 0;
@@ -789,8 +872,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       bottom: 100%;
       left: 0;
       min-width: 180px;
-      max-width: 280px;
-      max-height: 200px;
+      max-width: min(420px, calc(100vw - 16px));
+      max-height: 240px;
       overflow-y: auto;
       background: var(--vscode-dropdown-background);
       border: 1px solid var(--vscode-dropdown-border);
@@ -822,18 +905,52 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       flex-shrink: 0;
     }
     .picker-dropdown-item .item-label {
-      flex: 1;
+      flex: 1 1 auto;
+      min-width: 0;
+      white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      white-space: nowrap;
     }
-    .picker-dropdown-item .item-desc {
-      font-size: 0.85em;
+
+    /* Floating tooltip used by all picker dropdowns to show option
+       description on hover (positioned outside the dropdown). */
+    .picker-tooltip {
+      position: fixed;
+      display: none;
+      max-width: 280px;
+      padding: 6px 10px;
+      background: var(--vscode-editorHoverWidget-background);
+      color: var(--vscode-editorHoverWidget-foreground);
+      border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border));
+      border-radius: 4px;
+      font-size: calc(var(--vscode-font-size) - 1px);
+      line-height: 1.4;
+      white-space: normal;
+      word-break: break-word;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+      pointer-events: none;
+      z-index: 300;
+    }
+    .picker-tooltip.visible { display: block; }
+
+    /* Header for grouped picker options */
+    .picker-dropdown-group-header {
+      padding: 6px 10px 2px;
+      font-size: 0.75em;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
       opacity: 0.6;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      max-width: 100px;
+      pointer-events: none;
+      color: var(--vscode-dropdown-foreground);
+    }
+    .picker-dropdown-group-header:not(:first-child) {
+      border-top: 1px solid var(--vscode-panel-border);
+      margin-top: 4px;
+    }
+
+    /* Dynamic config-options picker row — sits inline with legacy pickers */
+    .picker-row {
+      display: contents;
     }
 
     /* Toolbar spacer */
@@ -975,6 +1092,31 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       opacity: 0.6;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Full-area overlay shown while a session is being loaded via session/load */
+    .load-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 10px;
+      background: color-mix(in srgb, var(--vscode-sideBar-background) 88%, transparent);
+      backdrop-filter: blur(2px);
+      z-index: 400;
+      font-size: 0.9em;
+      color: var(--vscode-foreground);
+      pointer-events: all;
+    }
+    .load-overlay.visible { display: flex; }
+    .load-overlay .spinner {
+      width: 22px;
+      height: 22px;
+      border-width: 3px;
+      opacity: 0.9;
+    }
+    .load-overlay .label { opacity: 0.85; }
   </style>
 </head>
 <body>
@@ -1010,6 +1152,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     </div>
     <div class="input-resize-handle" id="resizeHandle"></div>
     <div class="input-toolbar">
+      <!-- Dynamic config-options pickers (ACP "Session Config Options"). -->
+      <div class="picker-row" id="configOptionsContainer"></div>
+      <!-- Legacy pickers — used only when the agent has not migrated to configOptions -->
       <div class="picker-wrap hidden" id="modePickerWrap">
         <button class="picker-btn" id="modePickerBtn" title="Select mode">
           <span class="picker-icon">⚡</span>
@@ -1040,6 +1185,15 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     </div>
   </div>
 
+  <!-- Shared hover tooltip for picker dropdown items -->
+  <div class="picker-tooltip" id="pickerTooltip" role="tooltip"></div>
+
+  <!-- Overlay shown during session/load history replay -->
+  <div class="load-overlay" id="loadOverlay" role="status" aria-live="polite">
+    <div class="spinner"></div>
+    <div class="label">Loading conversation history…</div>
+  </div>
+
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const messagesEl = document.getElementById('messages');
@@ -1063,15 +1217,20 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     const modelPickerBtn = document.getElementById('modelPickerBtn');
     const modelPickerLabel = document.getElementById('modelPickerLabel');
     const modelDropdown = document.getElementById('modelDropdown');
+    const configOptionsContainer = document.getElementById('configOptionsContainer');
 
     let hasActiveSession = false;
     let isProcessing = false;
 
-    // Modes / models state
+    // Modes / models state (legacy fallback path)
     let availableModes = [];
     let currentModeId = null;
     let availableModels = [];
     let currentModelId = null;
+
+    // ACP Session Config Options state (preferred path)
+    let configOptions = [];        // SessionConfigOption[]
+    let useConfigOptions = false;  // true when the agent provided configOptions
 
     // Thinking state
     let currentThoughtEl = null;
@@ -1302,6 +1461,77 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       }
     }
 
+    // --- Session/load overlay ---
+    const loadOverlay = document.getElementById('loadOverlay');
+    // True while a session/load replay is in progress. Used to suppress
+    // per-chunk markdown rendering until the replay finishes.
+    let isLoadingSession = false;
+
+    function handleLoadSessionStart() {
+      isLoadingSession = true;
+      // Reset all chat state; behaves like clearChat but keeps the session
+      // banner / input area structure intact.
+      chatHistory = [];
+      saveState();
+      currentAssistantEl = null;
+      currentAssistantText = '';
+      toolCalls = {};
+      currentTurnEl = null;
+      currentToolsListEl = null;
+      currentToolsCountEl = null;
+      currentToolCount = 0;
+      currentThoughtEl = null;
+      currentThoughtTextEl = null;
+      currentThoughtText = '';
+      thoughtStartTime = null;
+      thoughtEndTime = null;
+      messagesEl.innerHTML = '';
+      if (emptyState) {
+        messagesEl.appendChild(emptyState);
+        emptyState.style.display = 'none';
+      }
+      if (loadOverlay) loadOverlay.classList.add('visible');
+      if (inputArea) inputArea.classList.add('disabled');
+      setProcessing(false);
+    }
+
+    function handleLoadSessionEnd(ok) {
+      isLoadingSession = false;
+      // Commit any trailing assistant turn captured during the replay.
+      finalizeCurrentAssistantTurn();
+      if (loadOverlay) loadOverlay.classList.remove('visible');
+      if (inputArea) inputArea.classList.remove('disabled');
+      // Batch-render markdown for every assistant message captured during
+      // the replay (avoids per-chunk render storms).
+      const items = [];
+      for (let i = 0; i < chatHistory.length; i++) {
+        const item = chatHistory[i];
+        if (item.kind === 'message' && item.role === 'assistant') {
+          items.push({ index: i, text: item.text });
+        }
+      }
+      if (items.length > 0) {
+        vscode.postMessage({ type: 'renderMarkdown', items });
+      }
+      scrollToBottom();
+      if (!ok) {
+        addMessage('error', 'Failed to load session history.');
+      }
+    }
+
+    function handleSessionInfoUpdate(title) {
+      if (!sessionState) return;
+      if (typeof title === 'string') {
+        sessionState.title = title;
+      } else if (title === null) {
+        delete sessionState.title;
+      }
+      saveState();
+      if (bannerAgent) {
+        bannerAgent.textContent = sessionState.title || sessionState.agentName || 'Agent';
+      }
+    }
+
     // --- Mode / Model pickers ---
 
     // --- Slash command helpers ---
@@ -1367,10 +1597,11 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       for (const mode of availableModes) {
         const item = document.createElement('div');
         item.className = 'picker-dropdown-item' + (mode.id === currentModeId ? ' selected' : '');
+        item.dataset.desc = mode.description || '';
+        if (mode.description) item.title = mode.description;
         item.innerHTML =
           '<span class="check">' + (mode.id === currentModeId ? '✓' : '') + '</span>' +
-          '<span class="item-label">' + escapeHtml(mode.name) + '</span>' +
-          (mode.description ? '<span class="item-desc">' + escapeHtml(mode.description) + '</span>' : '');
+          '<span class="item-label">' + escapeHtml(mode.name) + '</span>';
         item.addEventListener('click', (e) => {
           e.stopPropagation();
           closePickers();
@@ -1407,10 +1638,11 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       for (const model of availableModels) {
         const item = document.createElement('div');
         item.className = 'picker-dropdown-item' + (model.modelId === currentModelId ? ' selected' : '');
+        item.dataset.desc = model.description || '';
+        if (model.description) item.title = model.description;
         item.innerHTML =
           '<span class="check">' + (model.modelId === currentModelId ? '✓' : '') + '</span>' +
-          '<span class="item-label">' + escapeHtml(model.name) + '</span>' +
-          (model.description ? '<span class="item-desc">' + escapeHtml(model.description) + '</span>' : '');
+          '<span class="item-label">' + escapeHtml(model.name) + '</span>';
         item.addEventListener('click', (e) => {
           e.stopPropagation();
           closePickers();
@@ -1423,6 +1655,175 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           }
         });
         modelDropdown.appendChild(item);
+      }
+    }
+
+    // --- ACP Session Config Options ---
+
+    function iconForCategory(cat) {
+      switch (cat) {
+        case 'mode': return '⚡';
+        case 'model': return '🧠';
+        case 'thought_level': return '💭';
+        default: return '⚙';
+      }
+    }
+
+    function isGroupedOptions(opt) {
+      const arr = opt && opt.options;
+      if (!Array.isArray(arr) || arr.length === 0) return false;
+      const first = arr[0];
+      return !!(first && typeof first.group === 'string' && Array.isArray(first.options));
+    }
+
+    function findOptionValue(opt, value) {
+      if (!opt || !Array.isArray(opt.options)) return null;
+      if (isGroupedOptions(opt)) {
+        for (const group of opt.options) {
+          if (!group || !Array.isArray(group.options)) continue;
+          const hit = group.options.find(v => v && v.value === value);
+          if (hit) return hit;
+        }
+        return null;
+      }
+      return opt.options.find(v => v && v.value === value) || null;
+    }
+
+    function pickerLabelFor(opt) {
+      const v = findOptionValue(opt, opt.currentValue);
+      return v && v.name ? v.name : (opt.name || 'Option');
+    }
+
+    function pickerTooltipFor(opt) {
+      const v = findOptionValue(opt, opt.currentValue);
+      return (v && v.description) || opt.description || opt.name || '';
+    }
+
+    function renderConfigPickers(opts) {
+      configOptionsContainer.innerHTML = '';
+      if (!Array.isArray(opts)) return;
+
+      for (const opt of opts) {
+        // Spec: ignore unknown types and empty option lists
+        if (!opt || opt.type !== 'select') continue;
+        if (!Array.isArray(opt.options) || opt.options.length === 0) continue;
+
+        const wrap = document.createElement('div');
+        wrap.className = 'picker-wrap';
+        wrap.dataset.configId = opt.id;
+
+        const btn = document.createElement('button');
+        btn.className = 'picker-btn';
+        btn.title = pickerTooltipFor(opt);
+        btn.innerHTML =
+          '<span class="picker-icon">' + iconForCategory(opt.category) + '</span>' +
+          '<span class="picker-label"></span>' +
+          '<span class="picker-chevron">▾</span>';
+        btn.querySelector('.picker-label').textContent = pickerLabelFor(opt);
+        wrap.appendChild(btn);
+
+        const dropdown = document.createElement('div');
+        dropdown.className = 'picker-dropdown';
+        renderConfigDropdown(dropdown, opt);
+        wrap.appendChild(dropdown);
+
+        configOptionsContainer.appendChild(wrap);
+      }
+    }
+
+    function renderConfigDropdown(dropdown, opt) {
+      dropdown.innerHTML = '';
+      if (isGroupedOptions(opt)) {
+        for (const group of opt.options) {
+          if (!group || !Array.isArray(group.options)) continue;
+          const header = document.createElement('div');
+          header.className = 'picker-dropdown-group-header';
+          header.textContent = group.name || group.group || '';
+          dropdown.appendChild(header);
+          for (const v of group.options) {
+            dropdown.appendChild(buildConfigItem(opt, v));
+          }
+        }
+      } else {
+        for (const v of opt.options) {
+          dropdown.appendChild(buildConfigItem(opt, v));
+        }
+      }
+    }
+
+    function buildConfigItem(opt, v) {
+      const selected = v.value === opt.currentValue;
+      const item = document.createElement('div');
+      item.className = 'picker-dropdown-item' + (selected ? ' selected' : '');
+      item.dataset.value = v.value;
+      item.dataset.desc = v.description || '';
+      if (v.description) item.title = v.description;
+      item.innerHTML =
+        '<span class="check">' + (selected ? '✓' : '') + '</span>' +
+        '<span class="item-label"></span>';
+      item.querySelector('.item-label').textContent = v.name || v.value;
+      return item;
+    }
+
+    // Event delegation: handle clicks on dynamically-rendered config pickers
+    configOptionsContainer.addEventListener('click', (e) => {
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+
+      const item = target.closest('.picker-dropdown-item');
+      if (item) {
+        e.stopPropagation();
+        const wrap = item.closest('.picker-wrap');
+        const dropdown = item.closest('.picker-dropdown');
+        if (!wrap || !dropdown) return;
+        const configId = wrap.dataset.configId;
+        const value = item.dataset.value;
+        if (!configId || value == null) return;
+
+        // Find option in current state
+        const opt = configOptions.find(o => o && o.id === configId);
+        if (!opt || value === opt.currentValue) {
+          dropdown.classList.remove('open');
+          return;
+        }
+
+        // Optimistic update — agent's response will replace with authoritative state
+        opt.currentValue = value;
+        const labelEl = wrap.querySelector('.picker-btn .picker-label');
+        const btn = wrap.querySelector('.picker-btn');
+        if (labelEl) labelEl.textContent = pickerLabelFor(opt);
+        if (btn) btn.title = pickerTooltipFor(opt);
+        renderConfigDropdown(dropdown, opt);
+
+        dropdown.classList.remove('open');
+        vscode.postMessage({ type: 'setConfigOption', configId, value });
+        return;
+      }
+
+      const btn = target.closest('.picker-btn');
+      if (btn) {
+        e.stopPropagation();
+        const wrap = btn.closest('.picker-wrap');
+        if (!wrap) return;
+        const dropdown = wrap.querySelector('.picker-dropdown');
+        if (!dropdown) return;
+        const wasOpen = dropdown.classList.contains('open');
+        closePickers();
+        if (!wasOpen) dropdown.classList.add('open');
+      }
+    });
+
+    function setConfigOptionsState(opts) {
+      configOptions = Array.isArray(opts) ? opts : [];
+      useConfigOptions = configOptions.length > 0;
+
+      if (useConfigOptions) {
+        // Hide legacy pickers — spec requires configOptions to be used exclusively
+        modePickerWrap.classList.add('hidden');
+        modelPickerWrap.classList.add('hidden');
+        renderConfigPickers(configOptions);
+      } else {
+        configOptionsContainer.innerHTML = '';
       }
     }
 
@@ -1444,6 +1845,94 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     function closePickers() {
       modeDropdown.classList.remove('open');
       modelDropdown.classList.remove('open');
+      // Close any dynamic config-option dropdowns
+      const open = configOptionsContainer.querySelectorAll('.picker-dropdown.open');
+      open.forEach(el => el.classList.remove('open'));
+      hidePickerTooltip();
+    }
+
+    // --- Picker hover tooltip (shared by all picker dropdowns) ---
+    const pickerTooltip = document.getElementById('pickerTooltip');
+
+    function hidePickerTooltip() {
+      if (pickerTooltip) pickerTooltip.classList.remove('visible');
+    }
+
+    function showPickerTooltip(itemEl) {
+      if (!pickerTooltip || !itemEl) return;
+      const desc = itemEl.dataset && itemEl.dataset.desc;
+      if (!desc) { hidePickerTooltip(); return; }
+
+      pickerTooltip.textContent = desc;
+      // Make it measurable while invisible to the user.
+      pickerTooltip.style.left = '-9999px';
+      pickerTooltip.style.top = '-9999px';
+      pickerTooltip.classList.add('visible');
+
+      const dropdown = itemEl.closest('.picker-dropdown');
+      if (!dropdown) { hidePickerTooltip(); return; }
+      const dropRect = dropdown.getBoundingClientRect();
+      const itemRect = itemEl.getBoundingClientRect();
+      const tipRect = pickerTooltip.getBoundingClientRect();
+      const gap = 6;
+
+      // Prefer left side; flip to right if not enough room.
+      let left = dropRect.left - tipRect.width - gap;
+      if (left < 4) left = dropRect.right + gap;
+      // Clamp horizontally inside the viewport.
+      const maxLeft = window.innerWidth - tipRect.width - 4;
+      if (left > maxLeft) left = Math.max(4, maxLeft);
+
+      // Vertically align with the hovered item, clamped inside the viewport.
+      let top = itemRect.top;
+      const maxTop = window.innerHeight - tipRect.height - 4;
+      if (top > maxTop) top = Math.max(4, maxTop);
+
+      pickerTooltip.style.left = left + 'px';
+      pickerTooltip.style.top = top + 'px';
+    }
+
+    // Delegated hover handling — one listener handles every picker dropdown.
+    document.addEventListener('mouseover', (e) => {
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+      const item = target.closest('.picker-dropdown-item');
+      if (!item) return;
+      // Only consider items inside an open dropdown.
+      const dropdown = item.closest('.picker-dropdown');
+      if (!dropdown || !dropdown.classList.contains('open')) return;
+      showPickerTooltip(item);
+    });
+
+    document.addEventListener('mouseout', (e) => {
+      const target = e.target;
+      const related = e.relatedTarget;
+      if (!(target instanceof Element)) return;
+      const item = target.closest('.picker-dropdown-item');
+      if (!item) return;
+      // Stay visible if the mouse moved to another item inside the same dropdown.
+      if (related instanceof Element) {
+        const nextItem = related.closest('.picker-dropdown-item');
+        if (nextItem && nextItem !== item) return;
+      }
+      hidePickerTooltip();
+    });
+
+    // Hide the tooltip when the user scrolls a dropdown so it doesn't drift.
+    function attachScrollHide(dropdownEl) {
+      if (!dropdownEl || dropdownEl._tooltipScrollAttached) return;
+      dropdownEl._tooltipScrollAttached = true;
+      dropdownEl.addEventListener('scroll', hidePickerTooltip);
+    }
+    attachScrollHide(modeDropdown);
+    attachScrollHide(modelDropdown);
+    // Dynamic configOption dropdowns: rely on the same handler via event-delegation
+    // (they exist inside #configOptionsContainer); attach once per dropdown when created.
+    if (configOptionsContainer) {
+      const mo = new MutationObserver(() => {
+        configOptionsContainer.querySelectorAll('.picker-dropdown').forEach(attachScrollHide);
+      });
+      mo.observe(configOptionsContainer, { childList: true, subtree: true });
     }
 
     // Close pickers when clicking outside
@@ -1640,6 +2129,39 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       }
     }
 
+    /**
+     * Commit the in-progress assistant turn to chatHistory (without firing
+     * the live promptEnd markdown-render request — replay does that
+     * batched at loadSessionEnd). Resets all per-turn DOM/state pointers so
+     * the next turn starts fresh.
+     */
+    function finalizeCurrentAssistantTurn() {
+      if (currentThoughtText) {
+        finalizeThought();
+        const tEnd = thoughtEndTime || Date.now();
+        chatHistory.push({
+          kind: 'thought',
+          text: currentThoughtText,
+          durationSec: thoughtStartTime ? Math.round((tEnd - thoughtStartTime) / 1000) : 0,
+        });
+      }
+      if (currentAssistantText) {
+        chatHistory.push({ kind: 'message', role: 'assistant', text: currentAssistantText });
+        saveState();
+      }
+      currentAssistantEl = null;
+      currentAssistantText = '';
+      currentTurnEl = null;
+      currentToolsListEl = null;
+      currentToolsCountEl = null;
+      currentToolCount = 0;
+      currentThoughtEl = null;
+      currentThoughtTextEl = null;
+      currentThoughtText = '';
+      thoughtStartTime = null;
+      thoughtEndTime = null;
+    }
+
     function addThoughtDOM(text, durationSec) {
       hideEmpty();
       const el = document.createElement('details');
@@ -1653,13 +2175,25 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
     function showSessionConnected(session) {
       hasActiveSession = true;
-      sessionState = { agentName: session.agentName, cwd: session.cwd };
+      sessionState = {
+        agentName: session.agentName,
+        cwd: session.cwd,
+        title: session.title || undefined,
+      };
       saveState();
       showSessionConnectedFromState(sessionState);
 
-      // Update pickers from session data
-      if (session.modes) updateModePicker(session.modes);
-      if (session.models) updateModelPicker(session.models);
+      // Prefer ACP "Session Config Options" when provided. Spec: clients
+      // that support configOptions MUST use them exclusively and ignore
+      // the legacy modes field.
+      const cfg = session.configOptions;
+      if (Array.isArray(cfg) && cfg.length > 0) {
+        setConfigOptionsState(cfg);
+      } else {
+        setConfigOptionsState([]);
+        if (session.modes) updateModePicker(session.modes);
+        if (session.models) updateModelPicker(session.models);
+      }
       // Restore available commands
       if (session.availableCommands) {
         availableCommands = session.availableCommands;
@@ -1670,7 +2204,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     function showSessionConnectedFromState(ss) {
       hasActiveSession = true;
       hideEmpty();
-      if (bannerAgent) bannerAgent.textContent = ss.agentName || 'Agent';
+      if (bannerAgent) bannerAgent.textContent = ss.title || ss.agentName || 'Agent';
       if (bannerCwd) bannerCwd.textContent = ss.cwd || '';
       if (sessionBanner) sessionBanner.classList.add('visible');
       if (inputArea) inputArea.classList.remove('disabled');
@@ -1687,6 +2221,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       // Hide pickers when disconnected
       modePickerWrap.classList.add('hidden');
       modelPickerWrap.classList.add('hidden');
+      setConfigOptionsState([]);
     }
 
     // Handle messages from the extension
@@ -1785,6 +2320,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           if (inputArea) inputArea.classList.add('disabled');
           modePickerWrap.classList.add('hidden');
           modelPickerWrap.classList.add('hidden');
+          setConfigOptionsState([]);
           setProcessing(false);
           break;
 
@@ -1802,6 +2338,22 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
         case 'modelsUpdate':
           updateModelPicker(msg.models);
+          break;
+
+        case 'configOptionsUpdate':
+          setConfigOptionsState(msg.configOptions || []);
+          break;
+
+        case 'loadSessionStart':
+          handleLoadSessionStart();
+          break;
+
+        case 'loadSessionEnd':
+          handleLoadSessionEnd(!!msg.ok);
+          break;
+
+        case 'sessionInfoUpdate':
+          handleSessionInfoUpdate(msg.title);
           break;
 
         case 'markdownRendered': {
@@ -1869,8 +2421,27 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           break;
         }
 
-        case 'user_message_chunk':
+        case 'user_message_chunk': {
+          // Only the session/load replay path emits this; live prompts
+          // never echo the user's message. Use it to break apart historical
+          // turns: finalize any pending assistant turn first, then append
+          // the historical user message.
+          const content = update.content;
+          if (content && content.type === 'text' && typeof content.text === 'string') {
+            finalizeCurrentAssistantTurn();
+            // Coalesce consecutive user chunks into one message.
+            const last = chatHistory[chatHistory.length - 1];
+            if (last && last.kind === 'message' && last.role === 'user') {
+              last.text += content.text;
+              const allUser = messagesEl.querySelectorAll('.message.user');
+              const el = allUser[allUser.length - 1];
+              if (el) el.textContent = last.text;
+            } else {
+              addMessage('user', content.text);
+            }
+          }
           break;
+        }
 
         case 'agent_thought_chunk': {
           const content = update.content;
@@ -1933,6 +2504,12 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
             modePickerLabel.textContent = current.name;
             renderModeDropdown();
           }
+          break;
+        }
+
+        case 'config_option_update': {
+          // Server pushed a full configOptions replacement
+          setConfigOptionsState(update.configOptions || []);
           break;
         }
 

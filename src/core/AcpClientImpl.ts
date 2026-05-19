@@ -14,8 +14,8 @@ import type {
   TerminalOutputResponse,
   WaitForTerminalExitRequest,
   WaitForTerminalExitResponse,
-  KillTerminalCommandRequest,
-  KillTerminalCommandResponse,
+  KillTerminalRequest,
+  KillTerminalResponse,
   ReleaseTerminalRequest,
   ReleaseTerminalResponse,
 } from '@agentclientprotocol/sdk';
@@ -100,8 +100,8 @@ export class AcpClientImpl implements Client {
   }
 
   async killTerminal(
-    params: KillTerminalCommandRequest,
-  ): Promise<KillTerminalCommandResponse> {
+    params: KillTerminalRequest,
+  ): Promise<KillTerminalResponse> {
     return this.terminalHandler.killTerminal(params);
   }
 

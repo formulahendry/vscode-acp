@@ -8,8 +8,8 @@ import type {
   TerminalOutputResponse,
   WaitForTerminalExitRequest,
   WaitForTerminalExitResponse,
-  KillTerminalCommandRequest,
-  KillTerminalCommandResponse,
+  KillTerminalRequest,
+  KillTerminalResponse,
   ReleaseTerminalRequest,
   ReleaseTerminalResponse,
 } from '@agentclientprotocol/sdk';
@@ -187,7 +187,7 @@ export class TerminalHandler {
     };
   }
 
-  async killTerminal(params: KillTerminalCommandRequest): Promise<KillTerminalCommandResponse> {
+  async killTerminal(params: KillTerminalRequest): Promise<KillTerminalResponse> {
     const managed = this.terminals.get(params.terminalId);
     if (!managed) {
       throw new Error(`Terminal not found: ${params.terminalId}`);

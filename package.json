@@ -1,8 +1,8 @@
 {
   "name": "acp-client",
   "displayName": "ACP Client",
-  "description": "Agent Client Protocol client for VS Code — connect to GitHub Copilot, Claude Code, Gemini CLI, Qwen Code, Codex CLI, OpenCode, OpenClaw, and any ACP-compatible AI coding agent",
-  "version": "0.1.3",
+  "description": "Agent Client Protocol client for VS Code — connect to GitHub Copilot, Claude Code, Gemini CLI, Qwen Code, Codex CLI, OpenCode, OpenClaw, Kiro CLI, Hermes Agent, and any ACP-compatible AI coding agent",
+  "version": "0.2.0",
   "publisher": "formulahendry",
   "license": "MIT",
   "icon": "resources/icon.png",
@@ -134,12 +134,50 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "acp.refreshSessions",
+        "title": "ACP: Refresh Sessions"
+      },
+      {
+        "command": "acp.openSession",
+        "title": "ACP: Open Session"
+      },
+      {
+        "command": "acp.loadMoreSessions",
+        "title": "ACP: Load More Sessions"
+      },
+      {
+        "command": "acp.copySessionId",
+        "title": "Copy Session ID"
+      },
+      {
+        "command": "acp.forgetSession",
+        "title": "Forget Session"
+      },
+      {
         "command": "acp.restartAgent",
         "title": "ACP: Restart Agent",
         "icon": "$(debug-restart)"
       }
     ],
     "menus": {
+      "commandPalette": [
+        {
+          "command": "acp.openSession",
+          "when": "false"
+        },
+        {
+          "command": "acp.loadMoreSessions",
+          "when": "false"
+        },
+        {
+          "command": "acp.copySessionId",
+          "when": "false"
+        },
+        {
+          "command": "acp.forgetSession",
+          "when": "false"
+        }
+      ],
       "view/title": [
         {
           "command": "acp.addAgent",
@@ -206,6 +244,21 @@
         {
           "command": "acp.restartAgent",
           "when": "view == acp-sessions && viewItem == agent-connected"
+        },
+        {
+          "command": "acp.refreshSessions",
+          "when": "view == acp-sessions && viewItem =~ /^agent/",
+          "group": "session@1"
+        },
+        {
+          "command": "acp.copySessionId",
+          "when": "view == acp-sessions && viewItem =~ /^session/",
+          "group": "session@1"
+        },
+        {
+          "command": "acp.forgetSession",
+          "when": "view == acp-sessions && viewItem == session-local",
+          "group": "session@2"
         }
       ]
     },
@@ -239,7 +292,7 @@
             "Claude Code": {
               "command": "npx",
               "args": [
-                "@zed-industries/claude-code-acp@latest"
+                "@agentclientprotocol/claude-agent-acp@latest"
               ],
               "env": {}
             },
@@ -300,6 +353,20 @@
                 "acp"
               ],
               "env": {}
+            },
+            "Kiro CLI": {
+              "command": "kiro-cli",
+              "args": [
+                "acp"
+              ],
+              "env": {}
+            },
+            "Hermes Agent": {
+              "command": "hermes",
+              "args": [
+                "acp"
+              ],
+              "env": {}
             }
           }
         },
@@ -337,7 +404,7 @@
     "test": "vscode-test"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.14.1",
+    "@agentclientprotocol/sdk": "^0.21.1",
     "@vscode/extension-telemetry": "^1.5.0",
     "marked": "^15.0.0"
   },
