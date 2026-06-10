@@ -449,7 +449,7 @@ export class SessionManager extends EventEmitter {
       throw new Error(`No connection for agent: ${session.agentId}`);
     }
 
-    log(`sendPrompt: session=${sessionId}, text="${text.substring(0, 50)}..."`);
+    log(`sendPrompt: session=${sessionId}, textLength=${text.length}`);
 
     const prompt: ContentBlock[] = [
       { type: 'text', text },

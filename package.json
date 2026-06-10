@@ -129,6 +129,18 @@
         "icon": "$(attach)"
       },
       {
+        "command": "acp.enableEditorContextLink",
+        "title": "ACP: Enable Editor Context Link",
+        "icon": "$(pin)",
+        "when": "!acp.editorContextLinked"
+      },
+      {
+        "command": "acp.disableEditorContextLink",
+        "title": "ACP: Disable Editor Context Link",
+        "icon": "$(pinned)",
+        "when": "acp.editorContextLinked"
+      },
+      {
         "command": "acp.refreshAgents",
         "title": "Refresh",
         "icon": "$(refresh)"
@@ -176,6 +188,14 @@
         {
           "command": "acp.forgetSession",
           "when": "false"
+        },
+        {
+          "command": "acp.enableEditorContextLink",
+          "when": "!acp.editorContextLinked"
+        },
+        {
+          "command": "acp.disableEditorContextLink",
+          "when": "acp.editorContextLinked"
         }
       ],
       "view/title": [
@@ -204,14 +224,24 @@
           "group": "navigation@2"
         },
         {
+          "command": "acp.enableEditorContextLink",
+          "when": "view == acp-chat && !acp.editorContextLinked",
+          "group": "navigation@3"
+        },
+        {
+          "command": "acp.disableEditorContextLink",
+          "when": "view == acp-chat && acp.editorContextLinked",
+          "group": "navigation@3"
+        },
+        {
           "command": "acp.cancelTurn",
           "when": "view == acp-chat && acp.turnInProgress",
-          "group": "navigation@3"
+          "group": "navigation@4"
         },
         {
           "command": "acp.disconnectAgent",
           "when": "view == acp-chat",
-          "group": "navigation@4"
+          "group": "navigation@5"
         },
         {
           "command": "acp.showLog",
@@ -397,6 +427,7 @@
     "compile": "webpack",
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool hidden-source-map",
+    "vsx": "vsce package",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "lint": "eslint src --max-warnings 0",

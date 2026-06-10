@@ -8,10 +8,13 @@ import { SessionUpdateHandler } from './handlers/SessionUpdateHandler';
 import { SessionTreeProvider } from './ui/SessionTreeProvider';
 import { StatusBarManager } from './ui/StatusBarManager';
 import { ChatWebviewProvider } from './ui/ChatWebviewProvider';
+import { captureEditorContext, captureOpenEditorPaths, initializeOpenEditorsTracker } from './ui/EditorContext';
 import { getAgentNames } from './config/AgentConfig';
 import { fetchRegistry } from './config/RegistryClient';
 import { log, logError, disposeChannels, getOutputChannel, getTrafficChannel } from './utils/Logger';
 import { initTelemetry, sendEvent } from './utils/TelemetryManager';
+
+const EDITOR_CONTEXT_LINK_STATE_KEY = 'acp.editorContextLinked';
 
 export function activate(context: vscode.ExtensionContext): void {
   log('ACP Client extension activating...');
@@ -21,6 +24,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(telemetryReporter);
 
   // --- Core services ---
+  context.subscriptions.push(...initializeOpenEditorsTracker());
   const sessionUpdateHandler = new SessionUpdateHandler();
   const agentManager = new AgentManager();
   const connectionManager = new ConnectionManager(sessionUpdateHandler);
@@ -48,7 +52,17 @@ export function activate(context: vscode.ExtensionContext): void {
     context.extensionUri,
     sessionManager,
     sessionUpdateHandler,
+    () => captureEditorContext(
+      vscode.window.activeTextEditor,
+      captureOpenEditorPaths(vscode.window.tabGroups.all),
+    ),
   );
+  const initialEditorContextLinked = context.workspaceState.get<boolean>(
+    EDITOR_CONTEXT_LINK_STATE_KEY,
+    false,
+  );
+  chatWebviewProvider.setEditorContextLinked(initialEditorContextLinked);
+  void vscode.commands.executeCommand('setContext', EDITOR_CONTEXT_LINK_STATE_KEY, initialEditorContextLinked);
   const chatViewRegistration = vscode.window.registerWebviewViewProvider(
     ChatWebviewProvider.viewType,
     chatWebviewProvider,
@@ -470,6 +484,24 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   });
 
+  const setEditorContextLinked = async (linked: boolean) => {
+    chatWebviewProvider.setEditorContextLinked(linked);
+    await context.workspaceState.update(EDITOR_CONTEXT_LINK_STATE_KEY, linked);
+    await vscode.commands.executeCommand('setContext', EDITOR_CONTEXT_LINK_STATE_KEY, linked);
+    vscode.window.setStatusBarMessage(
+      linked ? 'ACP editor context link enabled.' : 'ACP editor context link disabled.',
+      2500,
+    );
+  };
+
+  const enableEditorContextLinkCmd = vscode.commands.registerCommand('acp.enableEditorContextLink', async () => {
+    await setEditorContextLinked(true);
+  });
+
+  const disableEditorContextLinkCmd = vscode.commands.registerCommand('acp.disableEditorContextLink', async () => {
+    await setEditorContextLinked(false);
+  });
+
   // Browse Registry
   const browseRegistryCmd = vscode.commands.registerCommand('acp.browseRegistry', async () => {
     sendEvent('registry/browse');
@@ -518,6 +550,8 @@ export function activate(context: vscode.ExtensionContext): void {
     addAgentCmd,
     removeAgentCmd,
     attachFileCmd,
+    enableEditorContextLinkCmd,
+    disableEditorContextLinkCmd,
     browseRegistryCmd,
     {
       dispose: () => {
