@@ -5,6 +5,8 @@ import { ConnectionManager } from './core/ConnectionManager';
 import { SessionManager } from './core/SessionManager';
 import { SessionHistoryStore } from './core/SessionHistoryStore';
 import { SessionUpdateHandler } from './handlers/SessionUpdateHandler';
+import { AcpDiffContentProvider, DIFF_URI_SCHEME } from './handlers/DiffContentProvider';
+import { DiffPreviewHandler } from './handlers/DiffPreviewHandler';
 import { SessionTreeProvider } from './ui/SessionTreeProvider';
 import { StatusBarManager } from './ui/StatusBarManager';
 import { ChatWebviewProvider } from './ui/ChatWebviewProvider';
@@ -22,6 +24,17 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // --- Core services ---
   const sessionUpdateHandler = new SessionUpdateHandler();
+
+  // Diff preview: custom URI scheme + listener on session/update
+  const diffContentProvider = new AcpDiffContentProvider();
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider(DIFF_URI_SCHEME, diffContentProvider),
+  );
+  const diffPreviewHandler = new DiffPreviewHandler(sessionUpdateHandler);
+  context.subscriptions.push({
+    dispose: () => diffPreviewHandler.dispose(),
+  });
+
   const agentManager = new AgentManager();
   const connectionManager = new ConnectionManager(sessionUpdateHandler);
   const sessionManager = new SessionManager(

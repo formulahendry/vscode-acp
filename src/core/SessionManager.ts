@@ -217,6 +217,49 @@ export class SessionManager extends EventEmitter {
         throw e;
       }
 
+      // Cache capabilities and check if agent supports session resume/load
+      const caps = this.summarizeCapabilities(connInfo.initResponse.agentCapabilities);
+      this.capabilities.set(agentName, caps);
+
+      // If agent supports session resume/load, try to resume the most recent session
+      if ((caps.resume || caps.load) && this.historyStore) {
+        const recent = this.historyStore.list(agentName, workspaceCwd).slice(0, 5);
+        if (recent.length > 0) {
+          const items: (vscode.QuickPickItem & { sessionId?: string })[] = recent.map(s => ({
+            label: s.title || s.firstPrompt || s.sessionId.slice(0, 8),
+            description: `上次会话 · ${new Date(s.lastActiveAt).toLocaleString()}`,
+            sessionId: s.sessionId,
+          }));
+          items.push({ label: '➕ 新建会话', description: '开始新的会话' });
+
+          // Show QuickPick with most recent session pre-selected
+          const picker = vscode.window.createQuickPick<typeof items[0]>();
+          picker.items = items;
+          picker.activeItems = [items[0]]; // Default to most recent
+          picker.placeholder = `恢复上次会话或新建（Enter 直接恢复最近一次）`;
+
+          const picked = await new Promise<typeof items[0] | undefined>(resolve => {
+            picker.onDidAccept(() => { resolve(picker.selectedItems[0]); picker.dispose(); });
+            picker.onDidHide(() => { resolve(undefined); picker.dispose(); });
+            picker.show();
+          });
+
+          if (picked?.sessionId) {
+            try {
+              const sessionInfo = caps.load
+                ? await this.loadSession(agentName, picked.sessionId)
+                : await this.resumeSession(agentName, picked.sessionId);
+
+              log(`Connected to agent ${agentName}, resumed session ${sessionInfo.sessionId}`);
+              sendEvent('agent/connect.end', { agentName, result: 'success' }, { duration: Date.now() - connectStartTime });
+              return sessionInfo;
+            } catch (e) {
+              logError(`Failed to resume session for ${agentName}, creating new`, e);
+            }
+          }
+        }
+      }
+
       // Create ACP session (with auth handling). The session is already
       // registered in `this.sessions` by createAcpSession so that any
       // notifications arriving during/after newSession can be persisted.
