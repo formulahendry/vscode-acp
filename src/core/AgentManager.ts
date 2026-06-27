@@ -91,20 +91,51 @@ export class AgentManager extends EventEmitter {
         });
       }
 
-      // On macOS/Linux, use the user's login shell so that PATH includes
-      // nvm, Homebrew, and other user-installed tool directories.
+      // On macOS/Linux, use the user's login shell to resolve PATH (nvm,
+      // Homebrew, etc.), but redirect stdin during profile sourcing so that
+      // profile scripts (e.g. distrobox_profile.sh calling host-spawn) cannot
+      // consume the ACP pipe before the agent process reads it.
+      //
+      // We do this by running the login shell with stdin redirected from
+      // /dev/null for the profile phase, then exec-ing the real command:
+      //   bash -l -c 'exec cmd args <&3' 3<&0
+      //
+      // The shell's own stdin (fd 0) during profile sourcing is /dev/null.
+      // We pass the real ACP pipe on fd 3 and the command restores it.
       const { shell, useLoginFlag } = resolveUnixShell();
       const commandStr = [config.command, ...(config.args || [])].map(shellEscape).join(' ');
-      const shellArgs = useLoginFlag ? ['-l', '-c', commandStr] : ['-c', commandStr];
+      // Wrap the command to restore stdin from fd 3 before exec.
+      // Profile scripts (e.g. distrobox_profile.sh) run host-spawn which
+      // inherits and consumes the shell's fd 0. By giving the login shell
+      // /dev/null as fd 0 and the real ACP pipe as fd 3, profile scripts
+      // cannot touch the ACP stream; the agent restores it with <&3.
+      const wrappedCommand = useLoginFlag ? `exec ${commandStr} <&3` : commandStr;
+      const shellArgs = useLoginFlag
+        ? ['-l', '-c', wrappedCommand]
+        : ['-c', commandStr];
 
       log(`Using shell: ${shell} ${shellArgs.join(' ')}`);
       const shellName = shell.split('/').pop() || shell;
       sendEvent('agent/spawn/shell', { shell: shellName, useLoginFlag: String(useLoginFlag) });
-      return spawn(shell, shellArgs, {
-        stdio: ['pipe', 'pipe', 'pipe'],
+
+      // When useLoginFlag: fd 0 = null (/dev/null) so profile scripts can't
+      // touch the ACP stream; fd 3 = real ACP stdin pipe, restored by <&3.
+      // When !useLoginFlag: normal pipe on fd 0.
+      const child = spawn(shell, shellArgs, {
+        stdio: useLoginFlag ? [null, 'pipe', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe'],
         env: { ...process.env, ...(config.env || {}) },
         cwd: cwd || undefined,
       });
+
+      // Expose fd 3 as .stdin so ConnectionManager sees the same interface.
+      if (useLoginFlag && child.stdio[3]) {
+        Object.defineProperty(child, 'stdin', {
+          get: () => child.stdio[3],
+          configurable: true,
+        });
+      }
+
+      return child;
     })();
 
     const instance: AgentInstance = { id, name, process: child, config };
