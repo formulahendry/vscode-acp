@@ -1390,7 +1390,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           selectSlashCommand(slashFilteredCommands[slashPopupSelectedIdx]);
           return;
         }
-        if (e.key === 'Enter' && !e.shiftKey) {
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
           e.preventDefault();
           selectSlashCommand(slashFilteredCommands[slashPopupSelectedIdx]);
           return;
@@ -1402,7 +1402,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         }
       }
 
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         if (isProcessing) {
           handleCancel();
