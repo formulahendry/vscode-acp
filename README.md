@@ -56,11 +56,37 @@ You can add custom agent configurations in settings.
 
 > **Note on Hermes Agent**: Hermes is a Python package, not an npm package. Install it via the [Hermes Quickstart](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart) (Linux/macOS/WSL2 only — Windows requires [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install)). Make sure `hermes` is on your `PATH` and launch VS Code from the same shell/venv. Configure credentials with `hermes model`.
 
+## Remote Agents (e.g. a remote Hermes install)
+
+ACP itself only speaks JSON-RPC over stdio ([Hermes's ACP docs](https://hermes-agent.nousresearch.com/docs/user-guide/features/acp) confirm the agent side has no built-in network transport either), so there's no "host" field baked into the protocol. This extension bridges that by optionally tunneling an agent's stdio through `ssh`: add a `remote` block to any agent entry and `command`/`args` are executed on that host instead of locally.
+
+```json
+"acp.agents": {
+  "Hermes Agent (Remote)": {
+    "command": "hermes",
+    "args": ["acp"],
+    "remote": {
+      "host": "my-remote-host",
+      "user": "johnny",
+      "port": 22,
+      "identityFile": "~/.ssh/id_ed25519"
+    }
+  }
+}
+```
+
+Requirements:
+- Passwordless SSH access to the host (key-based auth — there's no interactive password prompt support).
+- `hermes` on the remote account's `PATH`, with credentials already configured there (`hermes model`) — see the [Hermes ACP docs](https://hermes-agent.nousresearch.com/docs/user-guide/features/acp) for installing/configuring Hermes itself.
+- The remote command runs via a login shell (`bash -lc`) so `PATH` picks up nvm/pyenv/venv entries from the remote profile, same as local agents.
+
+Limitation: only the agent's stdio is tunneled. If the agent calls back into the editor's file-system/terminal capabilities with paths that only exist on the remote host, those calls still resolve against your *local* filesystem. For agents that need full remote file access, use [VS Code Remote - SSH](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-ssh) and install this extension inside that remote window instead — it declares no `extensionKind`, so it runs on the remote side there and `command` resolves against the remote `PATH` directly, with no `remote` block needed.
+
 ## Extension Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `acp.agents` | *(11 agents)* | Agent configurations. Each key is the agent name, value has `command`, `args`, and `env`. |
+| `acp.agents` | *(11 agents)* | Agent configurations. Each key is the agent name, value has `command`, `args`, `env`, and an optional `remote` (SSH) target. |
 | `acp.autoApprovePermissions` | `ask` | How agent permission requests are handled: `ask` or `allowAll`. |
 | `acp.defaultWorkingDirectory` | `""` | Default working directory for agent sessions. Empty uses current workspace. |
 | `acp.logTraffic` | `true` | Log all ACP protocol traffic to the ACP Traffic output channel. |

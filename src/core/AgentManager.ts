@@ -1,5 +1,7 @@
 import { spawn, ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { log, logError } from '../utils/Logger';
 import { sendEvent, sendError } from '../utils/TelemetryManager';
@@ -58,6 +60,45 @@ function resolveUnixShell(): { shell: string; useLoginFlag: boolean } {
   return { shell: '/bin/sh', useLoginFlag: false };
 }
 
+function expandHome(path: string): string {
+  if (path === '~') {
+    return homedir();
+  }
+  if (path.startsWith('~/')) {
+    return join(homedir(), path.slice(2));
+  }
+  return path;
+}
+
+/**
+ * Build the `ssh` command + args that tunnel an agent's stdio to a remote host.
+ *
+ * No `-t` flag is passed: ssh must NOT allocate a pty here, or the JSON-RPC
+ * stream on stdio would get mangled by terminal line-discipline processing.
+ * The remote command runs through `bash -lc` so the remote user's login
+ * profile (nvm, pyenv, venvs, etc.) is sourced — mirroring the local-spawn
+ * behavior below.
+ */
+function buildRemoteSshInvocation(config: AgentConfigEntry): { command: string; args: string[] } {
+  const remote = config.remote!;
+  const sshArgs: string[] = ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new'];
+
+  if (remote.port) {
+    sshArgs.push('-p', String(remote.port));
+  }
+  if (remote.identityFile) {
+    sshArgs.push('-i', expandHome(remote.identityFile));
+  }
+
+  const target = remote.user ? `${remote.user}@${remote.host}` : remote.host;
+  sshArgs.push(target);
+
+  const remoteCommandStr = [config.command, ...(config.args || [])].map(shellEscape).join(' ');
+  sshArgs.push(`bash -lc ${shellEscape(remoteCommandStr)}`);
+
+  return { command: 'ssh', args: sshArgs };
+}
+
 export interface AgentInstance {
   id: string;
   name: string;
@@ -77,9 +118,28 @@ export class AgentManager extends EventEmitter {
    */
   spawnAgent(name: string, config: AgentConfigEntry, cwd?: string): AgentInstance {
     const id = `agent_${this.nextId++}`;
-    log(`Spawning agent "${name}" (${id}): ${config.command} ${(config.args || []).join(' ')}`);
 
     const child = (() => {
+      if (config.remote) {
+        const { command, args } = buildRemoteSshInvocation(config);
+        log(`Spawning agent "${name}" (${id}) over SSH to ${config.remote.host}: ${config.command} ${(config.args || []).join(' ')}`);
+        sendEvent('agent/spawn/remote', { transport: 'ssh' });
+
+        // `cwd` (the local workspace folder) doesn't apply to a remote process —
+        // the remote command runs in the remote login shell's default directory.
+        // Note: this only tunnels the agent's stdio. If the agent calls back into
+        // the editor's fs/terminal capabilities with remote-side paths, those
+        // calls are still resolved against the *local* filesystem, so remote
+        // agents work best for conversation/execution that doesn't depend on
+        // client-side file access to remote-only paths.
+        return spawn(command, args, {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: { ...process.env, ...(config.env || {}) },
+        });
+      }
+
+      log(`Spawning agent "${name}" (${id}): ${config.command} ${(config.args || []).join(' ')}`);
+
       if (process.platform === 'win32') {
         // On Windows, commands like npx are batch scripts (.cmd) that require
         // shell resolution via cmd.exe.

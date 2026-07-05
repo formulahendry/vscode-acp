@@ -279,7 +279,50 @@
       "properties": {
         "acp.agents": {
           "type": "object",
-          "description": "Agent configurations. Each key is the agent name, value has command, args, and env.",
+          "description": "Agent configurations. Each key is the agent name, value has command, args, env, and an optional remote (SSH) target.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["command"],
+            "properties": {
+              "command": {
+                "type": "string",
+                "description": "Executable to run (locally, or on the remote host if \"remote\" is set)."
+              },
+              "args": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Command-line arguments."
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": { "type": "string" },
+                "description": "Environment variables for the agent process."
+              },
+              "remote": {
+                "type": "object",
+                "required": ["host"],
+                "description": "Run command/args on this remote host over SSH instead of locally (e.g. a remote Hermes Agent install).",
+                "properties": {
+                  "host": {
+                    "type": "string",
+                    "description": "Remote hostname/IP, or a Host alias from ~/.ssh/config."
+                  },
+                  "user": {
+                    "type": "string",
+                    "description": "SSH user. Omit to use ssh's default (current user / ssh config)."
+                  },
+                  "port": {
+                    "type": "number",
+                    "description": "SSH port. Omit to use the default (22) or ssh config."
+                  },
+                  "identityFile": {
+                    "type": "string",
+                    "description": "Path to a private key file. Supports a leading \"~\"."
+                  }
+                }
+              }
+            }
+          },
           "default": {
             "GitHub Copilot": {
               "command": "npx",
