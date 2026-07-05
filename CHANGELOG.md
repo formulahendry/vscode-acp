@@ -4,6 +4,11 @@ All notable changes to the "vscode-acp" extension will be documented in this fil
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [Unreleased]
+
+### Added
+- **Remote agents over SSH**: any `acp.agents` entry can now set a `remote: { host, user?, port?, identityFile? }` block to run `command`/`args` on a remote machine instead of locally — the agent's stdio is tunneled through `ssh`. Useful for agents like Hermes Agent installed on a remote server. See the "Remote Agents" section in the README for setup and limitations.
+
 ## [0.2.0] - 2026-05-16
 
 ### Added
