@@ -274,9 +274,11 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   private sendCurrentState(): void {
     const activeId = this.sessionManager.getActiveSessionId();
     const session = activeId ? this.sessionManager.getSession(activeId) : null;
+    const config = vscode.workspace.getConfiguration('acp.chat');
     this.postMessage({
       type: 'state',
       activeSessionId: activeId,
+      autoScroll: config.get<boolean>('autoScroll', true),
       session: session ? {
         sessionId: session.sessionId,
         agentName: session.agentDisplayName,
@@ -1221,6 +1223,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
     let hasActiveSession = false;
     let isProcessing = false;
+    let autoScrollEnabled = true;
+    let userScrolledUp = false;
 
     // Modes / models state (legacy fallback path)
     let availableModes = [];
@@ -1416,6 +1420,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       const text = promptInput.value.trim();
       if (!text || isProcessing) return;
 
+      userScrolledUp = false;
       addMessage('user', text);
       promptInput.value = '';
       vscode.postMessage({ type: 'sendPrompt', text });
@@ -1959,9 +1964,29 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       if (emptyState) emptyState.style.display = 'none';
     }
 
+    /**
+     * Auto-scroll to bottom, respecting user scroll position.
+     * Follows the standard chat-UI pattern used by Claude Code, VS Code Copilot, etc.:
+     * - Auto-scroll follows new content by default.
+     * - If the user has manually scrolled up, auto-scroll pauses.
+     * - Scrolling back to the bottom (or sending a new message) resumes auto-scroll.
+     */
     function scrollToBottom() {
+      if (!autoScrollEnabled) return;
+      if (userScrolledUp) return;
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
+
+    // Track user scroll intent: pausing auto-scroll when the user reads history.
+    // 80px threshold matches the standard used by Claude Code and VS Code Copilot Chat.
+    messagesEl.addEventListener('scroll', function () {
+      const atBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 80;
+      if (!atBottom) {
+        userScrolledUp = true;
+      } else {
+        userScrolledUp = false;
+      }
+    });
 
     function getStatusIcon(status) {
       switch (status) {
@@ -2229,6 +2254,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       const msg = event.data;
       switch (msg.type) {
         case 'state':
+          if (msg.autoScroll !== undefined) {
+            autoScrollEnabled = msg.autoScroll;
+          }
           if (msg.session) {
             showSessionConnected(msg.session);
           } else {

@@ -384,6 +384,11 @@
           "default": "",
           "description": "Default working directory for agent sessions. Leave empty to use the current workspace folder."
         },
+        "acp.chat.autoScroll": {
+          "type": "boolean",
+          "default": true,
+          "description": "When enabled, auto-scrolls the chat to follow new content. Pauses when you scroll up to read history, resumes when you scroll back to the bottom or send a new message."
+        },
         "acp.logTraffic": {
           "type": "boolean",
           "default": true,
