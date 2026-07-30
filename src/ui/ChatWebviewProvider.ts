@@ -143,6 +143,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         updatedAt: updateData.updatedAt,
       });
     }
+    if (updateData?.sessionUpdate === 'usage_update') {
+      this.sessionManager.applyUsage(update.sessionId, updateData);
+    }
 
     // Only forward to the webview if this is the active session — the
     // webview only ever shows one session at a time.
@@ -286,6 +289,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         models: session.models,
         configOptions: session.configOptions,
         availableCommands: session.availableCommands,
+        usage: session.usage,
       } : null,
     });
   }
@@ -398,7 +402,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       border-bottom: 1px solid var(--vscode-panel-border);
       font-size: 0.9em;
     }
-    .session-banner.visible { display: flex; align-items: center; gap: 8px; }
+    .session-banner.visible { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
     .session-banner .dot {
       width: 8px;
       height: 8px;
@@ -417,6 +421,38 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       font-size: 0.85em;
       opacity: 0.7;
       flex-shrink: 0;
+    }
+
+    /* Input area usage bar */
+    .input-usage-bar {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 0 12px;
+      height: 22px;
+      font-size: 0.8em;
+      color: var(--vscode-descriptionForeground);
+    }
+    .input-usage-bar.visible { display: flex; }
+    .input-usage-label { flex-shrink: 0; }
+    .input-usage-track {
+      flex: 1;
+      height: 6px;
+      background: color-mix(in srgb, var(--vscode-input-border, #808080) 30%, transparent);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .input-usage-fill {
+      height: 100%;
+      background: var(--vscode-progressBar-background);
+      border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+    .input-usage-text {
+      flex-shrink: 0;
+      min-width: 70px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
     }
 
     /* Messages area */
@@ -773,7 +809,39 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       border-bottom: 1px solid var(--vscode-panel-border);
       font-size: 0.9em;
     }
-    .session-banner.visible { display: flex; align-items: center; gap: 8px; }
+    .session-banner.visible { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+    /* Input area usage bar */
+    .input-usage-bar {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 0 12px;
+      height: 22px;
+      font-size: 0.8em;
+      color: var(--vscode-descriptionForeground);
+    }
+    .input-usage-bar.visible { display: flex; }
+    .input-usage-label { flex-shrink: 0; }
+    .input-usage-track {
+      flex: 1;
+      height: 6px;
+      background: color-mix(in srgb, var(--vscode-input-border, #808080) 30%, transparent);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .input-usage-fill {
+      height: 100%;
+      background: var(--vscode-progressBar-background);
+      border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+    .input-usage-text {
+      flex-shrink: 0;
+      min-width: 70px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
 
     /* Input area states */
     .input-area.disabled .input-toolbar,
@@ -1173,6 +1241,13 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       </div>
       <span class="toolbar-spacer"></span>
     </div>
+    <div class="input-usage-bar" id="usageBar">
+      <span class="input-usage-label">🧠</span>
+      <div class="input-usage-track">
+        <div class="input-usage-fill" id="usageBarFill"></div>
+      </div>
+      <span class="input-usage-text" id="usageBarText"></span>
+    </div>
     <div class="input-editor-wrap">
       <textarea
         id="promptInput"
@@ -1218,9 +1293,13 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     const modelPickerLabel = document.getElementById('modelPickerLabel');
     const modelDropdown = document.getElementById('modelDropdown');
     const configOptionsContainer = document.getElementById('configOptionsContainer');
+    const usageBar = document.getElementById('usageBar');
+    const usageBarFill = document.getElementById('usageBarFill');
+    const usageBarText = document.getElementById('usageBarText');
 
     let hasActiveSession = false;
     let isProcessing = false;
+    let lastUsage = null;  // { used: number, size: number }
 
     // Modes / models state (legacy fallback path)
     let availableModes = [];
@@ -1252,6 +1331,25 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       if (!promptInput.value.startsWith('/')) {
         promptInput.placeholder = savedPlaceholder;
       }
+    }
+
+    // --- Token usage bar ---
+    function formatTokens(n) {
+      if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+      if (n >= 1_000) return Math.round(n / 1_000) + 'K';
+      return String(n);
+    }
+
+    function updateUsageBar(usage) {
+      if (!usageBar || !usageBarFill || !usageBarText) return;
+      if (!usage || !usage.size) {
+        usageBar.classList.remove('visible');
+        return;
+      }
+      usageBar.classList.add('visible');
+      const pct = Math.min(100, (usage.used / usage.size) * 100);
+      usageBarFill.style.width = pct + '%';
+      usageBarText.textContent = formatTokens(usage.used) + '/' + formatTokens(usage.size);
     }
 
     // --- State persistence ---
@@ -2199,6 +2297,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         availableCommands = session.availableCommands;
       }
       updatePlaceholder();
+
+      // Restore usage bar — always reset on session switch to avoid showing stale values
+      lastUsage = session.usage || null;
+      updateUsageBar(lastUsage);
     }
 
     function showSessionConnectedFromState(ss) {
@@ -2214,8 +2316,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     function showNoSession() {
       hasActiveSession = false;
       sessionState = null;
+      lastUsage = null;
       saveState();
       if (sessionBanner) sessionBanner.classList.remove('visible');
+      if (usageBar) usageBar.classList.remove('visible');
       if (emptyState) emptyState.style.display = '';
       if (inputArea) inputArea.classList.add('disabled');
       // Hide pickers when disconnected
@@ -2312,11 +2416,13 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           thoughtStartTime = null;
           thoughtEndTime = null;
           availableCommands = [];
+          lastUsage = null;
           slashPopup.classList.remove('open');
           messagesEl.innerHTML = '';
           messagesEl.appendChild(emptyState);
           if (emptyState) emptyState.style.display = '';
           if (sessionBanner) sessionBanner.classList.remove('visible');
+          if (usageBar) usageBar.classList.remove('visible');
           if (inputArea) inputArea.classList.add('disabled');
           modePickerWrap.classList.add('hidden');
           modelPickerWrap.classList.add('hidden');
@@ -2516,6 +2622,11 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         case 'available_commands_update':
           availableCommands = update.availableCommands || [];
           updatePlaceholder();
+          break;
+
+        case 'usage_update':
+          lastUsage = { used: update.used, size: update.size };
+          updateUsageBar(lastUsage);
           break;
       }
     }

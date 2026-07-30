@@ -12,6 +12,7 @@ import type {
   SessionConfigOption,
   SessionInfo as ProtocolSessionInfo,
   AgentCapabilities,
+  UsageUpdate,
 } from '@agentclientprotocol/sdk';
 import { RequestError } from '@agentclientprotocol/sdk';
 
@@ -43,6 +44,8 @@ export interface SessionInfo {
   availableCommands: AvailableCommand[];
   /** Latest title supplied via `session_info_update`, if any. */
   title?: string;
+  /** Latest token usage from `usage_update` notifications. */
+  usage: UsageUpdate | null;
 }
 
 /**
@@ -85,6 +88,7 @@ export class SessionManager extends EventEmitter {
   private pendingAvailableCommands: Map<string, AvailableCommand[]> = new Map();
   private pendingConfigOptions: Map<string, SessionConfigOption[]> = new Map();
   private pendingTitles: Map<string, string> = new Map();
+  private pendingUsages: Map<string, UsageUpdate> = new Map();
 
   /**
    * Cache of `initialize.agentCapabilities` per agent so the tree can render
@@ -328,6 +332,7 @@ export class SessionManager extends EventEmitter {
       models: (sessionResponse as any).models ?? null,
       configOptions: (sessionResponse as any).configOptions ?? null,
       availableCommands: [],
+      usage: null,
     };
 
     // Register the session into the map *synchronously* with newSession's
@@ -432,6 +437,11 @@ export class SessionManager extends EventEmitter {
     if (pendingTitle !== undefined) {
       sessionInfo.title = pendingTitle;
       this.pendingTitles.delete(sessionInfo.sessionId);
+    }
+    const pendingUsage = this.pendingUsages.get(sessionInfo.sessionId);
+    if (pendingUsage) {
+      sessionInfo.usage = pendingUsage;
+      this.pendingUsages.delete(sessionInfo.sessionId);
     }
   }
 
@@ -622,6 +632,20 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
+   * Apply a `usage_update` notification: stores usage on the session and
+   * emits for the status bar.
+   */
+  applyUsage(sessionId: string, usage: UsageUpdate): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      this.pendingUsages.set(sessionId, usage);
+      return;
+    }
+    session.usage = usage;
+    this.emit('session-usage-changed', sessionId, usage);
+  }
+
+  /**
    * Record the first user prompt of a session so the history-store tree can
    * use it as a label fallback when no title arrives.
    */
@@ -802,6 +826,7 @@ export class SessionManager extends EventEmitter {
       models: null,
       configOptions: null,
       availableCommands: [],
+      usage: null,
     };
     this.sessions.set(sessionId, placeholder);
     this.drainPending(placeholder);
@@ -914,6 +939,7 @@ export class SessionManager extends EventEmitter {
       models: response?.models ?? null,
       configOptions: response?.configOptions ?? null,
       availableCommands: [],
+      usage: null,
     };
     this.sessions.set(sessionId, sessionInfo);
     this.drainPending(sessionInfo);

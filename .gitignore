@@ -5,3 +5,10 @@ out/
 *.map
 .vscode-test/
 .DS_Store
+
+# Compiled test outputs (source in test/ stays tracked)
+test/**/*.js
+test/**/*.d.ts
+
+# Auto-generated session handoff
+HANDOFF.md

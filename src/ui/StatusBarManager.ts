@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { SessionManager } from '../core/SessionManager';
+import { computeUsageSuffix } from '../util/usage';
 
 /**
  * Manages the status bar item showing ACP connection status.
@@ -21,6 +22,7 @@ export class StatusBarManager {
     this.sessionManager.on('active-session-changed', () => this.updateStatus());
     this.sessionManager.on('agent-error', () => this.showError());
     this.sessionManager.on('agent-closed', () => this.updateStatus());
+    this.sessionManager.on('session-usage-changed', () => this.updateStatus());
   }
 
   private updateStatus(): void {
@@ -33,7 +35,8 @@ export class StatusBarManager {
       this.statusBarItem.backgroundColor = undefined;
     } else {
       const agentName = activeSession?.agentDisplayName || connectedAgents[0];
-      this.statusBarItem.text = `$(hubot) ACP: ${agentName}`;
+      const usageSuffix = computeUsageSuffix(activeSession?.usage);
+      this.statusBarItem.text = `$(hubot) ACP: ${agentName}${usageSuffix}`;
       this.statusBarItem.tooltip = `Connected to ${agentName}\n${connectedAgents.length} agent(s) connected`;
       this.statusBarItem.backgroundColor = undefined;
     }
