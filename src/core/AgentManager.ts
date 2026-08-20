@@ -1,6 +1,7 @@
 import { spawn, ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { accessSync, constants, existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
+import { delimiter, isAbsolute, join } from 'node:path';
 import { log, logError } from '../utils/Logger';
 import { sendEvent, sendError } from '../utils/TelemetryManager';
 import type { AgentConfigEntry } from '../config/AgentConfig';
@@ -12,6 +13,69 @@ import type { AgentConfigEntry } from '../config/AgentConfig';
 function shellEscape(arg: string): string {
   // Replace ' with '\'' (end quote, escaped quote, start quote)
   return `'${arg.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Resolve a bare executable name using the supplied environment's PATH.
+ *
+ * VS Code can be launched with a different environment from the user's
+ * terminal, so relying on the child shell to find a preset CLI is not enough.
+ * Keep unresolved names unchanged so login-shell startup files still get a
+ * chance to add tools such as nvm-managed binaries to PATH.
+ */
+export function resolveCommandFromPath(command: string, env: NodeJS.ProcessEnv): string {
+  if (isAbsolute(command) || command.includes('/') || command.includes('\\')) {
+    return command;
+  }
+
+  const pathValue = env.PATH || env.Path;
+  if (!pathValue) {
+    return command;
+  }
+
+  const candidates = process.platform === 'win32'
+    ? windowsCommandCandidates(command, env.PATHEXT)
+    : [command];
+  const accessMode = process.platform === 'win32' ? constants.F_OK : constants.X_OK;
+
+  for (const directory of pathValue.split(delimiter)) {
+    for (const candidate of candidates) {
+      const resolved = join(directory || '.', candidate);
+      try {
+        accessSync(resolved, accessMode);
+        return resolved;
+      } catch {
+        // Try the next PATH entry.
+      }
+    }
+  }
+
+  return command;
+}
+
+function windowsCommandCandidates(command: string, pathExtValue?: string): string[] {
+  const pathExt = pathExtValue || '.COM;.EXE;.BAT;.CMD';
+  const hasExtension = pathExt
+    .split(';')
+    .some(ext => command.toLowerCase().endsWith(ext.toLowerCase()));
+  return hasExtension ? [command] : [command, ...pathExt.split(';').map(ext => `${command}${ext}`)];
+}
+
+/**
+ * Keep the extension's PATH available after a login shell loads its profile.
+ * Some CLI launchers use `/usr/bin/env` in their shebang, so resolving the
+ * launcher itself is not enough if the login profile removes its interpreter.
+ */
+function buildPathPrefix(shell: string, pathValue?: string): string {
+  if (!pathValue) {
+    return '';
+  }
+
+  const shellName = shell.split('/').pop() || shell;
+  if (shellName === 'fish') {
+    return `set -lx PATH ${shellEscape(pathValue)} $PATH; `;
+  }
+  return `export PATH=${shellEscape(pathValue)}:$PATH; `;
 }
 
 /**
@@ -78,14 +142,19 @@ export class AgentManager extends EventEmitter {
   spawnAgent(name: string, config: AgentConfigEntry, cwd?: string): AgentInstance {
     const id = `agent_${this.nextId++}`;
     log(`Spawning agent "${name}" (${id}): ${config.command} ${(config.args || []).join(' ')}`);
+    const env = { ...process.env, ...(config.env || {}) };
+    const command = resolveCommandFromPath(config.command, env);
+    if (command !== config.command) {
+      log(`Resolved agent command from PATH: ${config.command} -> ${command}`);
+    }
 
     const child = (() => {
       if (process.platform === 'win32') {
         // On Windows, commands like npx are batch scripts (.cmd) that require
         // shell resolution via cmd.exe.
-        return spawn(config.command, config.args || [], {
+        return spawn(command, config.args || [], {
           stdio: ['pipe', 'pipe', 'pipe'],
-          env: { ...process.env, ...(config.env || {}) },
+          env,
           cwd: cwd || undefined,
           shell: true,
         });
@@ -94,7 +163,8 @@ export class AgentManager extends EventEmitter {
       // On macOS/Linux, use the user's login shell so that PATH includes
       // nvm, Homebrew, and other user-installed tool directories.
       const { shell, useLoginFlag } = resolveUnixShell();
-      const commandStr = [config.command, ...(config.args || [])].map(shellEscape).join(' ');
+      const pathPrefix = buildPathPrefix(shell, env.PATH || env.Path);
+      const commandStr = pathPrefix + [command, ...(config.args || [])].map(shellEscape).join(' ');
       const shellArgs = useLoginFlag ? ['-l', '-c', commandStr] : ['-c', commandStr];
 
       log(`Using shell: ${shell} ${shellArgs.join(' ')}`);
@@ -102,7 +172,7 @@ export class AgentManager extends EventEmitter {
       sendEvent('agent/spawn/shell', { shell: shellName, useLoginFlag: String(useLoginFlag) });
       return spawn(shell, shellArgs, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, ...(config.env || {}) },
+        env,
         cwd: cwd || undefined,
       });
     })();
