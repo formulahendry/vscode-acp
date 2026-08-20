@@ -4,6 +4,14 @@ All notable changes to the "vscode-acp" extension will be documented in this fil
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [Unreleased]
+
+### Added
+- **MothX**: Added MothX as a pre-configured ACP agent (`mothx acp --mode agent`).
+
+### Fixed
+- Agent commands are now resolved from `PATH` before spawning, so preset CLIs no longer require absolute paths.
+
 ## [0.2.0] - 2026-05-16
 
 ### Added
