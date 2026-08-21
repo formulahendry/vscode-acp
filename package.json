@@ -384,6 +384,11 @@
           "default": "",
           "description": "Default working directory for agent sessions. Leave empty to use the current workspace folder."
         },
+        "acp.includeActiveFile": {
+          "type": "boolean",
+          "default": false,
+          "description": "Attach the currently active editor file to each prompt as a resource_link content block. The agent receives the file path; Hermes Agent inlines the content automatically."
+        },
         "acp.logTraffic": {
           "type": "boolean",
           "default": true,

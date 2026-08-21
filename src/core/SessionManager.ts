@@ -451,9 +451,23 @@ export class SessionManager extends EventEmitter {
 
     log(`sendPrompt: session=${sessionId}, text="${text.substring(0, 50)}..."`);
 
-    const prompt: ContentBlock[] = [
-      { type: 'text', text },
-    ];
+    const prompt: ContentBlock[] = [{ type: 'text', text }];
+
+    // Attach the active file when acp.includeActiveFile is enabled.
+    // Hermes Agent inlines the file content itself; other agents with
+    // resource_link support can read it from disk.
+    const cfg = vscode.workspace.getConfiguration('acp');
+    if (cfg.get<boolean>('includeActiveFile', false)) {
+      const editor = vscode.window.activeTextEditor;
+      if (editor) {
+        prompt.unshift({
+          type: 'resource_link',
+          uri: editor.document.uri.toString(),
+          name: editor.document.uri.fsPath,
+          mimeType: editor.document.uri.scheme === 'untitled' ? 'text/plain' : undefined,
+        });
+      }
+    }
 
     const response = await connInfo.connection.prompt({
       sessionId,
