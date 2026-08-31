@@ -648,6 +648,31 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .tool-call-inline.has-diff { cursor: pointer; }
+    .tool-call-inline .tc-diffstat {
+      flex-shrink: 0;
+      font-variant-numeric: tabular-nums;
+    }
+    .tool-call-inline .tc-diffstat .add { color: var(--vscode-gitDecoration-addedResourceForeground); }
+    .tool-call-inline .tc-diffstat .del { color: var(--vscode-gitDecoration-deletedResourceForeground); }
+    .tc-diff {
+      margin: 2px 0 6px 20px;
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 4px;
+      overflow-x: auto;
+      font-family: var(--vscode-editor-font-family), monospace;
+      font-size: 0.85em;
+      white-space: pre;
+    }
+    .tc-diff.collapsed { display: none; }
+    .tc-diff .tc-diff-path {
+      padding: 2px 6px;
+      background: var(--vscode-editorWidget-background);
+      color: var(--vscode-descriptionForeground);
+    }
+    .tc-diff .line { padding: 0 6px; }
+    .tc-diff .line.add { background: var(--vscode-diffEditor-insertedTextBackground); }
+    .tc-diff .line.del { background: var(--vscode-diffEditor-removedTextBackground); }
 
     /* Legacy standalone tool-call card (for history restore) */
     .tool-call {
@@ -2008,13 +2033,13 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       }
     }
 
-    function addToolCall(toolCallId, title, status) {
+    function addToolCall(toolCallId, title, status, content) {
       chatHistory.push({ kind: 'toolCall', toolCallId, title, status });
       saveState();
-      addToolCallInline(toolCallId, title, status);
+      addToolCallInline(toolCallId, title, status, content);
     }
 
-    function addToolCallInline(toolCallId, title, status) {
+    function addToolCallInline(toolCallId, title, status, content) {
       hideEmpty();
       ensureTurnTools();
       currentToolCount++;
@@ -2031,8 +2056,80 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         '<span class="tc-title">' + escapeHtml(title || 'Tool Call') + '</span>';
       currentToolsListEl.appendChild(el);
       toolCalls[toolCallId] = el;
+      renderToolDiff(el, content);
       scrollToBottom();
     }
+
+    // Agents report file edits as ACP diff content on the tool call. The diff
+    // is rendered next to the tool call row and stays collapsed until the row
+    // is clicked. It lives in the DOM only, so a restored history shows the
+    // tool call without its diff.
+    function extractDiffBlocks(content) {
+      if (!Array.isArray(content)) return [];
+      return content
+        .filter((c) => c && c.type === 'diff')
+        .map((c) => ({
+          path: c.path || '',
+          oldText: typeof c.oldText === 'string' ? c.oldText : '',
+          newText: typeof c.newText === 'string' ? c.newText : '',
+        }));
+    }
+
+    function diffLineEl(kind, text) {
+      const row = document.createElement('div');
+      row.className = 'line ' + kind;
+      row.textContent = text;
+      return row;
+    }
+
+    function renderToolDiff(el, content) {
+      const diffs = extractDiffBlocks(content);
+      if (!diffs.length || !el || !el.parentNode) return;
+
+      // A finished tool call repeats the diff it announced when it started.
+      const previous = el.nextElementSibling;
+      const wasOpen = previous && previous.classList.contains('tc-diff')
+        ? !previous.classList.contains('collapsed')
+        : false;
+      if (previous && previous.classList.contains('tc-diff')) previous.remove();
+
+      let added = 0;
+      let removed = 0;
+      const box = document.createElement('div');
+      box.className = 'tc-diff' + (wasOpen ? '' : ' collapsed');
+      for (const d of diffs) {
+        if (d.path) {
+          const head = document.createElement('div');
+          head.className = 'tc-diff-path';
+          head.textContent = d.path;
+          box.appendChild(head);
+        }
+        const oldLines = d.oldText ? d.oldText.split('\\n') : [];
+        const newLines = d.newText ? d.newText.split('\\n') : [];
+        removed += oldLines.length;
+        added += newLines.length;
+        for (const line of oldLines) box.appendChild(diffLineEl('del', '-' + line));
+        for (const line of newLines) box.appendChild(diffLineEl('add', '+' + line));
+      }
+      el.parentNode.insertBefore(box, el.nextSibling);
+
+      let stat = el.querySelector('.tc-diffstat');
+      if (!stat) {
+        stat = document.createElement('span');
+        stat.className = 'tc-diffstat';
+        el.appendChild(stat);
+      }
+      stat.innerHTML = '<span class="add">+' + added + '</span> <span class="del">-' + removed + '</span>';
+      el.classList.add('has-diff');
+      if (!el.dataset.diffToggle) {
+        el.dataset.diffToggle = '1';
+        el.addEventListener('click', () => {
+          const target = el.nextElementSibling;
+          if (target && target.classList.contains('tc-diff')) target.classList.toggle('collapsed');
+        });
+      }
+    }
+
 
     // Fallback DOM builder for history restore (standalone card)
     function addToolCallDOM(toolCallId, title, status) {
@@ -2047,7 +2144,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       scrollToBottom();
     }
 
-    function updateToolCall(toolCallId, status, title) {
+    function updateToolCall(toolCallId, status, title, content) {
       for (let i = chatHistory.length - 1; i >= 0; i--) {
         if (chatHistory[i].kind === 'toolCall' && chatHistory[i].toolCallId === toolCallId) {
           chatHistory[i].status = status;
@@ -2069,6 +2166,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           const titleEl = el.querySelector('.tc-title');
           if (titleEl) titleEl.textContent = title;
         }
+        renderToolDiff(el, content);
         return;
       }
       // Legacy card style fallback
@@ -2478,6 +2576,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
             tc.toolCallId || 'unknown',
             tc.title || 'Tool Call',
             tc.status || 'pending',
+            tc.content,
           );
           break;
         }
@@ -2487,6 +2586,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
             update.toolCallId || 'unknown',
             update.status || 'completed',
             update.title,
+            update.content,
           );
           break;
         }

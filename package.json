@@ -409,6 +409,7 @@
     "marked": "^15.0.0"
   },
   "devDependencies": {
+    "@types/jsdom": "^30.0.0",
     "@types/mocha": "^10.0.6",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
@@ -418,6 +419,7 @@
     "@vscode/test-electron": "^2.4.1",
     "@vscode/vsce": "^3.7.1",
     "eslint": "^9.0.0",
+    "jsdom": "^30.0.1",
     "ts-loader": "^9.5.0",
     "typescript": "^5.5.0",
     "typescript-eslint": "^8.0.0",
