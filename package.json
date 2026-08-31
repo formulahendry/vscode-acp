@@ -370,7 +370,20 @@
             }
           }
         },
-        "acp.autoApprovePermissions": {
+        "acp.chat.midRunPrompt": {
+      "type": "string",
+      "enum": [
+        "queue",
+        "send"
+      ],
+      "enumDescriptions": [
+        "Hold the prompt until the running turn finishes, then send it.",
+        "Send the prompt right away and let the agent decide what to do with it. Agents that can steer a running turn apply it immediately; agents that do not accept a prompt mid-turn answer with an error."
+      ],
+      "default": "queue",
+      "description": "What happens to a prompt you send while the agent is still working on the previous one."
+    },
+    "acp.autoApprovePermissions": {
           "type": "string",
           "enum": [
             "ask",
