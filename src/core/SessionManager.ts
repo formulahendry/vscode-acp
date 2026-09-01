@@ -217,6 +217,24 @@ export class SessionManager extends EventEmitter {
         throw e;
       }
 
+      this.capabilities.set(
+        agentName,
+        this.summarizeCapabilities(connInfo.initResponse.agentCapabilities),
+      );
+
+      // Pick up where the user left off in this folder instead of opening an
+      // empty session next to a history they would have to go looking for.
+      const restored = await this.restoreLatestSession(agentName, workspaceCwd);
+      if (restored) {
+        log(`Continued session ${restored.sessionId} for agent ${agentName}`);
+        sendEvent(
+          'agent/connect.end',
+          { agentName, result: 'success' },
+          { duration: Date.now() - connectStartTime },
+        );
+        return restored;
+      }
+
       // Create ACP session (with auth handling). The session is already
       // registered in `this.sessions` by createAcpSession so that any
       // notifications arriving during/after newSession can be persisted.
@@ -251,6 +269,36 @@ export class SessionManager extends EventEmitter {
     await this.disconnectAgent(agentName);
     this.emit('clear-chat');
     return this.connectToAgent(agentName);
+  }
+
+  /**
+   * Continue the agent's most recent session for this folder. Returns null
+   * when the agent cannot list or replay sessions, when it has none here, or
+   * when the attempt fails — the caller then starts a fresh session.
+   */
+  private async restoreLatestSession(
+    agentName: string,
+    cwd: string,
+  ): Promise<SessionInfo | null> {
+    const caps = this.capabilities.get(agentName);
+    if (!caps?.list || (!caps.load && !caps.resume)) {
+      return null;
+    }
+    try {
+      const { sessions } = await this.listSessions(agentName, { cwd });
+      const latest = [...(sessions ?? [])].sort(
+        (a, b) => Date.parse(b.updatedAt ?? '') - Date.parse(a.updatedAt ?? ''),
+      )[0];
+      if (!latest?.sessionId) {
+        return null;
+      }
+      return caps.load
+        ? await this.loadSession(agentName, latest.sessionId)
+        : await this.resumeSession(agentName, latest.sessionId);
+    } catch (e) {
+      logError(`Could not continue the last session for "${agentName}"`, e);
+      return null;
+    }
   }
 
   /**
