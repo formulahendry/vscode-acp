@@ -18,11 +18,14 @@ import type {
   KillTerminalResponse,
   ReleaseTerminalRequest,
   ReleaseTerminalResponse,
+  CreateElicitationRequest,
+  CreateElicitationResponse,
 } from '@agentclientprotocol/sdk';
 
 import { FileSystemHandler } from '../handlers/FileSystemHandler';
 import { TerminalHandler } from '../handlers/TerminalHandler';
 import { PermissionHandler } from '../handlers/PermissionHandler';
+import { ElicitationHandler } from '../handlers/ElicitationHandler';
 import { SessionUpdateHandler } from '../handlers/SessionUpdateHandler';
 import { log } from '../utils/Logger';
 
@@ -41,6 +44,7 @@ export class AcpClientImpl implements Client {
     private readonly terminalHandler: TerminalHandler,
     private readonly permissionHandler: PermissionHandler,
     private readonly sessionUpdateHandler: SessionUpdateHandler,
+    private readonly elicitationHandler: ElicitationHandler,
   ) {}
 
   setAgent(agent: Agent): void {
@@ -61,6 +65,12 @@ export class AcpClientImpl implements Client {
 
   async sessionUpdate(params: SessionNotification): Promise<void> {
     this.sessionUpdateHandler.handleUpdate(params);
+  }
+
+  async unstable_createElicitation(
+    params: CreateElicitationRequest,
+  ): Promise<CreateElicitationResponse> {
+    return this.elicitationHandler.createElicitation(params);
   }
 
   // --- File system methods ---

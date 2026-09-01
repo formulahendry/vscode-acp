@@ -2,7 +2,12 @@ import * as vscode from 'vscode';
 import { marked } from 'marked';
 import { SessionManager } from '../core/SessionManager';
 import { SessionUpdateHandler, SessionUpdateListener } from '../handlers/SessionUpdateHandler';
-import type { SessionNotification } from '@agentclientprotocol/sdk';
+import type {
+  CreateElicitationRequest,
+  CreateElicitationResponse,
+  ElicitationContentValue,
+  SessionNotification,
+} from '@agentclientprotocol/sdk';
 import { logError } from '../utils/Logger';
 import { sendEvent } from '../utils/TelemetryManager';
 
@@ -16,6 +21,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private updateListener: SessionUpdateListener;
   private _hasChatContent = false;
+  private elicitationSeq = 0;
+  private pendingElicitations = new Map<string, (response: CreateElicitationResponse) => void>();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -78,6 +85,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         case 'cancelTurn':
           await this.handleCancelTurn();
           break;
+        case 'elicitationResult':
+          this.resolveElicitation(message.id, message.action, message.content);
+          break;
         case 'setMode':
           await this.handleSetMode(message.modeId);
           break;
@@ -111,6 +121,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
     webviewView.onDidDispose(() => {
       this.view = undefined;
+      for (const resolve of this.pendingElicitations.values()) {
+        resolve({ action: 'cancel' });
+      }
+      this.pendingElicitations.clear();
     });
   }
 
@@ -200,6 +214,43 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       });
       this.postMessage({ type: 'promptEnd', stopReason: 'error' });
     }
+  }
+
+  /**
+   * Show an agent's elicitation in the chat and wait for the user's answer.
+   */
+  async presentElicitation(
+    params: CreateElicitationRequest,
+  ): Promise<CreateElicitationResponse> {
+    if (!this.view || params.mode !== 'form') {
+      return { action: 'decline' };
+    }
+    this._hasChatContent = true;
+    this.view.show?.(true);
+    const id = `elicitation-${++this.elicitationSeq}`;
+    return new Promise<CreateElicitationResponse>((resolve) => {
+      this.pendingElicitations.set(id, resolve);
+      this.postMessage({
+        type: 'elicitation',
+        id,
+        message: params.message,
+        schema: params.requestedSchema,
+      });
+    });
+  }
+
+  private resolveElicitation(id: string, action: string, content: unknown): void {
+    const resolve = this.pendingElicitations.get(id);
+    if (!resolve) { return; }
+    this.pendingElicitations.delete(id);
+    if (action === 'accept') {
+      resolve({
+        action: 'accept',
+        content: content as Record<string, ElicitationContentValue>,
+      });
+      return;
+    }
+    resolve({ action: action === 'cancel' ? 'cancel' : 'decline' });
   }
 
   /**
@@ -648,6 +699,48 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+
+    .elicitation {
+      border: 1px solid var(--vscode-focusBorder);
+      border-radius: var(--message-radius);
+      padding: 8px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 0.9em;
+    }
+    .elicitation.answered { opacity: 0.6; border-color: var(--vscode-panel-border); }
+    .elicitation-message { white-space: pre-wrap; }
+    .elicitation-field { display: flex; flex-direction: column; gap: 4px; }
+    .elicitation-field label { color: var(--vscode-descriptionForeground); }
+    .elicitation-field input[type="text"],
+    .elicitation-field input[type="number"],
+    .elicitation-field select {
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border, transparent);
+      border-radius: 3px;
+      padding: 3px 6px;
+      font-family: inherit;
+      font-size: inherit;
+    }
+    .elicitation-check { display: flex; align-items: center; gap: 6px; }
+    .elicitation-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .elicitation-actions button {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      border: none;
+      border-radius: 3px;
+      padding: 4px 10px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: inherit;
+    }
+    .elicitation-actions button.secondary {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+    }
+    .elicitation-actions button:disabled { opacity: 0.5; cursor: default; }
 
     /* Legacy standalone tool-call card (for history restore) */
     .tool-call {
@@ -1955,6 +2048,214 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       return el;
     }
 
+    // An agent can ask for structured input instead of guessing. The request
+    // carries a message and a JSON schema; each property becomes one control.
+    // A single choice property is rendered as buttons so one click answers.
+    function enumOptions(prop) {
+      if (Array.isArray(prop.oneOf)) {
+        return prop.oneOf.map((o) => ({ value: o.const, title: o.title || o.const }));
+      }
+      if (Array.isArray(prop.enum)) {
+        return prop.enum.map((v) => ({ value: v, title: v }));
+      }
+      return null;
+    }
+
+    function multiSelectOptions(prop) {
+      const items = prop.items || {};
+      if (Array.isArray(items.anyOf)) {
+        return items.anyOf.map((o) => ({ value: o.const, title: o.title || o.const }));
+      }
+      if (Array.isArray(items.enum)) {
+        return items.enum.map((v) => ({ value: v, title: v }));
+      }
+      return [];
+    }
+
+    function renderElicitation(msg) {
+      hideEmpty();
+      finalizeCurrentAssistantTurn();
+
+      const schema = msg.schema || {};
+      const properties = schema.properties || {};
+      const keys = Object.keys(properties);
+      const required = Array.isArray(schema.required) ? schema.required : [];
+
+      const card = document.createElement('div');
+      card.className = 'elicitation';
+
+      if (schema.title) {
+        const heading = document.createElement('div');
+        heading.className = 'elicitation-message';
+        heading.textContent = schema.title;
+        card.appendChild(heading);
+      }
+      const text = document.createElement('div');
+      text.className = 'elicitation-message';
+      text.textContent = msg.message || 'The agent is asking for input.';
+      card.appendChild(text);
+
+      const values = {};
+      const readers = [];
+      let answered = false;
+
+      function answer(action, content) {
+        if (answered) return;
+        answered = true;
+        card.classList.add('answered');
+        const controls = card.querySelectorAll('input, select, button');
+        for (let i = 0; i < controls.length; i++) controls[i].disabled = true;
+        vscode.postMessage({ type: 'elicitationResult', id: msg.id, action, content });
+      }
+
+      // One choice, no other fields: the options themselves are the answer.
+      const singleChoice = keys.length === 1 ? enumOptions(properties[keys[0]]) : null;
+      if (singleChoice && singleChoice.length) {
+        const row = document.createElement('div');
+        row.className = 'elicitation-actions';
+        for (const option of singleChoice) {
+          const button = document.createElement('button');
+          button.textContent = option.title;
+          button.addEventListener('click', () => {
+            const content = {};
+            content[keys[0]] = option.value;
+            answer('accept', content);
+          });
+          row.appendChild(button);
+        }
+        const decline = document.createElement('button');
+        decline.className = 'secondary';
+        decline.textContent = 'Decline';
+        decline.addEventListener('click', () => answer('decline', null));
+        row.appendChild(decline);
+        card.appendChild(row);
+        messagesEl.appendChild(card);
+        scrollToBottom();
+        return;
+      }
+
+      for (const key of keys) {
+        const prop = properties[key] || {};
+        const field = document.createElement('div');
+        field.className = 'elicitation-field';
+        const labelText = (prop.title || key) + (required.indexOf(key) >= 0 ? ' *' : '');
+        const options = prop.type === 'string' ? enumOptions(prop) : null;
+
+        if (prop.type === 'boolean') {
+          const wrap = document.createElement('label');
+          wrap.className = 'elicitation-check';
+          const box = document.createElement('input');
+          box.type = 'checkbox';
+          box.checked = prop.default === true;
+          box.addEventListener('change', updateSubmit);
+          wrap.appendChild(box);
+          wrap.appendChild(document.createTextNode(labelText));
+          field.appendChild(wrap);
+          readers.push(() => { values[key] = box.checked; return true; });
+        } else if (prop.type === 'array') {
+          const label = document.createElement('label');
+          label.textContent = labelText;
+          field.appendChild(label);
+          const boxes = [];
+          for (const option of multiSelectOptions(prop)) {
+            const wrap = document.createElement('label');
+            wrap.className = 'elicitation-check';
+            const box = document.createElement('input');
+            box.type = 'checkbox';
+            box.value = option.value;
+            box.checked = Array.isArray(prop.default) && prop.default.indexOf(option.value) >= 0;
+            box.addEventListener('change', updateSubmit);
+            boxes.push(box);
+            wrap.appendChild(box);
+            wrap.appendChild(document.createTextNode(option.title));
+            field.appendChild(wrap);
+          }
+          readers.push(() => {
+            const picked = boxes.filter((b) => b.checked).map((b) => b.value);
+            values[key] = picked;
+            const min = typeof prop.minItems === 'number' ? prop.minItems : 0;
+            return picked.length >= min;
+          });
+        } else if (options && options.length) {
+          const label = document.createElement('label');
+          label.textContent = labelText;
+          field.appendChild(label);
+          const select = document.createElement('select');
+          for (const option of options) {
+            const item = document.createElement('option');
+            item.value = option.value;
+            item.textContent = option.title;
+            select.appendChild(item);
+          }
+          if (prop.default) select.value = prop.default;
+          select.addEventListener('change', updateSubmit);
+          field.appendChild(select);
+          readers.push(() => { values[key] = select.value; return !!select.value; });
+        } else {
+          const label = document.createElement('label');
+          label.textContent = labelText;
+          field.appendChild(label);
+          const input = document.createElement('input');
+          const numeric = prop.type === 'number' || prop.type === 'integer';
+          input.type = numeric ? 'number' : 'text';
+          if (prop.default !== undefined && prop.default !== null) input.value = prop.default;
+          if (prop.description) input.placeholder = prop.description;
+          input.addEventListener('input', updateSubmit);
+          field.appendChild(input);
+          readers.push(() => {
+            const raw = input.value.trim();
+            if (numeric) {
+              values[key] = raw === '' ? null : Number(raw);
+              return raw !== '' && !isNaN(values[key]);
+            }
+            values[key] = raw;
+            return raw !== '';
+          });
+        }
+
+        if (prop.description && prop.type !== 'string') {
+          const hint = document.createElement('label');
+          hint.textContent = prop.description;
+          field.appendChild(hint);
+        }
+        card.appendChild(field);
+      }
+
+      const actions = document.createElement('div');
+      actions.className = 'elicitation-actions';
+      const submit = document.createElement('button');
+      submit.textContent = 'Send';
+      const decline = document.createElement('button');
+      decline.className = 'secondary';
+      decline.textContent = 'Decline';
+      actions.appendChild(submit);
+      actions.appendChild(decline);
+      card.appendChild(actions);
+
+      function collect() {
+        let complete = true;
+        for (let i = 0; i < readers.length; i++) {
+          const filled = readers[i]();
+          if (!filled && required.indexOf(keys[i]) >= 0) complete = false;
+        }
+        return complete;
+      }
+
+      function updateSubmit() {
+        submit.disabled = !collect();
+      }
+
+      submit.addEventListener('click', () => {
+        if (!collect()) return;
+        answer('accept', values);
+      });
+      decline.addEventListener('click', () => answer('decline', null));
+      updateSubmit();
+
+      messagesEl.appendChild(card);
+      scrollToBottom();
+    }
+
     function hideEmpty() {
       if (emptyState) emptyState.style.display = 'none';
     }
@@ -2234,6 +2535,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           } else {
             showNoSession();
           }
+          break;
+
+        case 'elicitation':
+          renderElicitation(msg);
           break;
 
         case 'promptStart':

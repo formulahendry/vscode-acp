@@ -5,6 +5,7 @@ import { ConnectionManager } from './core/ConnectionManager';
 import { SessionManager } from './core/SessionManager';
 import { SessionHistoryStore } from './core/SessionHistoryStore';
 import { SessionUpdateHandler } from './handlers/SessionUpdateHandler';
+import { ElicitationHandler } from './handlers/ElicitationHandler';
 import { SessionTreeProvider } from './ui/SessionTreeProvider';
 import { StatusBarManager } from './ui/StatusBarManager';
 import { ChatWebviewProvider } from './ui/ChatWebviewProvider';
@@ -22,8 +23,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // --- Core services ---
   const sessionUpdateHandler = new SessionUpdateHandler();
+  const elicitationHandler = new ElicitationHandler();
   const agentManager = new AgentManager();
-  const connectionManager = new ConnectionManager(sessionUpdateHandler);
+  const connectionManager = new ConnectionManager(sessionUpdateHandler, elicitationHandler);
   const sessionManager = new SessionManager(
     agentManager,
     connectionManager,
@@ -49,6 +51,9 @@ export function activate(context: vscode.ExtensionContext): void {
     sessionManager,
     sessionUpdateHandler,
   );
+  elicitationHandler.setPresenter((params) => chatWebviewProvider.presentElicitation(params));
+  context.subscriptions.push({ dispose: () => elicitationHandler.setPresenter(undefined) });
+
   const chatViewRegistration = vscode.window.registerWebviewViewProvider(
     ChatWebviewProvider.viewType,
     chatWebviewProvider,

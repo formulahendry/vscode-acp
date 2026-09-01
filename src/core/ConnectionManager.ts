@@ -9,6 +9,7 @@ import { FileSystemHandler } from '../handlers/FileSystemHandler';
 import { TerminalHandler } from '../handlers/TerminalHandler';
 import { PermissionHandler } from '../handlers/PermissionHandler';
 import { SessionUpdateHandler } from '../handlers/SessionUpdateHandler';
+import { ElicitationHandler } from '../handlers/ElicitationHandler';
 import { log, logError, logTraffic } from '../utils/Logger';
 import { version as extensionVersion } from '../../package.json';
 
@@ -27,6 +28,7 @@ export class ConnectionManager {
 
   constructor(
     private readonly sessionUpdateHandler: SessionUpdateHandler,
+    private readonly elicitationHandler: ElicitationHandler,
   ) {}
 
   /**
@@ -60,6 +62,7 @@ export class ConnectionManager {
       terminalHandler,
       permissionHandler,
       this.sessionUpdateHandler,
+      this.elicitationHandler,
     );
 
     // Create connection — toClient factory receives the Agent proxy
@@ -85,6 +88,9 @@ export class ConnectionManager {
           writeTextFile: true,
         },
         terminal: true,
+        elicitation: {
+          form: {},
+        },
       },
     });
 
