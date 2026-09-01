@@ -168,16 +168,6 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
 
-    // Confirm if there's existing chat content
-    if (chatWebviewProvider.hasChatContent) {
-      const choice = await vscode.window.showWarningMessage(
-        'Start a new conversation? This will clear the current chat history.',
-        'New Conversation',
-        'Cancel',
-      );
-      if (choice !== 'New Conversation') { return; }
-    }
-
     try {
       await vscode.window.withProgress(
         {

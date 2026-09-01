@@ -248,9 +248,74 @@ export class SessionManager extends EventEmitter {
     }
 
     const agentName = activeSession.agentName;
-    await this.disconnectAgent(agentName);
-    this.emit('clear-chat');
-    return this.connectToAgent(agentName);
+    const connInfo = this.connectionManager.getConnection(activeSession.agentId);
+    if (!connInfo) {
+      // Connection is gone (agent crashed or was killed): start a fresh one.
+      await this.disconnectAgent(agentName);
+      this.emit('clear-chat');
+      return this.connectToAgent(agentName);
+    }
+
+    // An agent keeps every session of a connection, so opening another one
+    // leaves a session that is still working alone.
+    const sessionInfo = await this.createAcpSession(
+      agentName,
+      activeSession.agentId,
+      connInfo,
+      this.getWorkspaceCwd(),
+    );
+    this.agentSessions.set(agentName, sessionInfo.sessionId);
+    this.activeSessionId = sessionInfo.sessionId;
+    this.emit('active-session-changed', sessionInfo.sessionId);
+    log(`New session ${sessionInfo.sessionId} for agent ${agentName}`);
+    return sessionInfo;
+  }
+
+  /**
+   * Switch to a session that is still live on its agent connection. Unlike
+   * loadSession this needs no replay: the session was never torn down.
+   */
+  activateSession(sessionId: string): SessionInfo | undefined {
+    const session = this.sessions.get(sessionId);
+    if (!session || !this.connectionManager.getConnection(session.agentId)) {
+      return undefined;
+    }
+    if (this.activeSessionId === sessionId) {
+      return session;
+    }
+    this.agentSessions.set(session.agentName, sessionId);
+    this.activeSessionId = sessionId;
+    this.emit('active-session-changed', sessionId);
+    return session;
+  }
+
+  /** Sessions that are still live on a connected agent, oldest first. */
+  listLiveSessions(): SessionInfo[] {
+    return Array.from(this.sessions.values()).filter(
+      (session) => !!this.connectionManager.getConnection(session.agentId),
+    );
+  }
+
+  /**
+   * Move the active pointer away from the previous session before another one
+   * takes over. A session that is still live on its connection is kept so the
+   * user can switch back to it.
+   */
+  private releasePreviousActiveSession(nextSessionId: string): void {
+    const previouslyActive = this.activeSessionId;
+    if (!previouslyActive || previouslyActive === nextSessionId) {
+      return;
+    }
+    const prevSession = this.sessions.get(previouslyActive);
+    if (prevSession) {
+      this.agentSessions.delete(prevSession.agentName);
+      if (!this.connectionManager.getConnection(prevSession.agentId)) {
+        this.sessions.delete(previouslyActive);
+      }
+    } else {
+      this.sessions.delete(previouslyActive);
+    }
+    this.activeSessionId = null;
   }
 
   /**
@@ -268,10 +333,16 @@ export class SessionManager extends EventEmitter {
 
     this.agentManager.killAgent(session.agentId);
     this.connectionManager.removeConnection(session.agentId);
-    this.sessions.delete(sessionId);
+    // One connection can hold several sessions; killing the process ends all.
+    const ownSessionIds = Array.from(this.sessions.values())
+      .filter((candidate) => candidate.agentId === session.agentId)
+      .map((candidate) => candidate.sessionId);
+    for (const ownSessionId of ownSessionIds) {
+      this.sessions.delete(ownSessionId);
+    }
     this.agentSessions.delete(agentName);
 
-    if (this.activeSessionId === sessionId) {
+    if (this.activeSessionId && ownSessionIds.includes(this.activeSessionId)) {
       this.activeSessionId = null;
     }
 
@@ -769,15 +840,7 @@ export class SessionManager extends EventEmitter {
 
     // If the same agent has a different active session, clear it so the
     // load can take over as the new active session.
-    const previouslyActive = this.activeSessionId;
-    if (previouslyActive && previouslyActive !== sessionId) {
-      const prevSession = this.sessions.get(previouslyActive);
-      if (prevSession) {
-        this.agentSessions.delete(prevSession.agentName);
-      }
-      this.sessions.delete(previouslyActive);
-      this.activeSessionId = null;
-    }
+    this.releasePreviousActiveSession(sessionId);
 
     const cwd = this.getWorkspaceCwd();
     const agentId = this.findAgentIdForConnection(conn);
@@ -869,15 +932,7 @@ export class SessionManager extends EventEmitter {
     }
 
     // If the same agent has a different active session, clear it.
-    const previouslyActive = this.activeSessionId;
-    if (previouslyActive && previouslyActive !== sessionId) {
-      const prevSession = this.sessions.get(previouslyActive);
-      if (prevSession) {
-        this.agentSessions.delete(prevSession.agentName);
-      }
-      this.sessions.delete(previouslyActive);
-      this.activeSessionId = null;
-    }
+    this.releasePreviousActiveSession(sessionId);
 
     const cwd = this.getWorkspaceCwd();
     const agentId = this.findAgentIdForConnection(conn);

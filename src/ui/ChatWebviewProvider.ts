@@ -6,6 +6,9 @@ import type { SessionNotification } from '@agentclientprotocol/sdk';
 import { logError } from '../utils/Logger';
 import { sendEvent } from '../utils/TelemetryManager';
 
+/** Session updates kept per session for tab switching. */
+const TRANSCRIPT_LIMIT = 5000;
+
 /**
  * WebviewViewProvider for the ACP chat sidebar.
  * Renders chat messages, tool calls, plans, and handles user input.
@@ -16,6 +19,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private updateListener: SessionUpdateListener;
   private _hasChatContent = false;
+  /** Session updates per session, replayed when the user switches tabs. */
+  private transcripts = new Map<string, SessionNotification[]>();
+  /** Prompts still running, per session. */
+  private inFlight = new Map<string, number>();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -78,6 +85,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         case 'cancelTurn':
           await this.handleCancelTurn();
           break;
+        case 'selectSession':
+          this.handleSelectSession(message.sessionId);
+          break;
         case 'setMode':
           await this.handleSetMode(message.modeId);
           break;
@@ -95,6 +105,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         case 'ready':
           // Webview loaded — send current session state
           this.sendCurrentState();
+          this.postSessions();
           break;
         case 'renderMarkdown': {
           // Webview requests markdown rendering for history items
@@ -144,6 +155,15 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       });
     }
 
+    // Every session keeps its own transcript so a tab that was left running
+    // can be replayed when the user comes back to it.
+    const transcript = this.transcripts.get(update.sessionId) ?? [];
+    transcript.push(update);
+    if (transcript.length > TRANSCRIPT_LIMIT) {
+      transcript.splice(0, transcript.length - TRANSCRIPT_LIMIT);
+    }
+    this.transcripts.set(update.sessionId, transcript);
+
     // Only forward to the webview if this is the active session — the
     // webview only ever shows one session at a time.
     const activeId = this.sessionManager.getActiveSessionId();
@@ -180,26 +200,90 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     this.sessionManager.recordFirstPrompt(activeId, text);
 
     // Tell webview we're processing
-    this.postMessage({ type: 'promptStart' });
+    this.inFlight.set(activeId, (this.inFlight.get(activeId) ?? 0) + 1);
+    this.postForSession(activeId, { type: 'promptStart' });
+    this.postSessions();
 
     try {
       const response = await this.sessionManager.sendPrompt(activeId, text);
+      this.sessionManager.touchHistory(activeId);
       // Render the accumulated assistant text as markdown
       // The webview will have sent us the raw text via promptEnd handling
-      this.postMessage({
+      this.finishPrompt(activeId, {
         type: 'promptEnd',
         stopReason: response.stopReason,
         usage: (response as any).usage,
       });
-      this.sessionManager.touchHistory(activeId);
     } catch (e: any) {
       logError('Prompt failed', e);
-      this.postMessage({
+      this.postForSession(activeId, {
         type: 'error',
         message: e.message || 'Prompt failed',
       });
-      this.postMessage({ type: 'promptEnd', stopReason: 'error' });
+      this.finishPrompt(activeId, { type: 'promptEnd', stopReason: 'error' });
     }
+  }
+
+  /** A prompt returned: only the session it belongs to leaves the busy state. */
+  private finishPrompt(sessionId: string, endMessage: Record<string, unknown>): void {
+    const left = (this.inFlight.get(sessionId) ?? 1) - 1;
+    if (left > 0) {
+      this.inFlight.set(sessionId, left);
+    } else {
+      this.inFlight.delete(sessionId);
+    }
+    this.postForSession(sessionId, endMessage);
+    this.postSessions();
+  }
+
+  /** Post a message only while the given session is the one on screen. */
+  private postForSession(sessionId: string, message: Record<string, unknown>): void {
+    if (this.sessionManager.getActiveSessionId() !== sessionId) { return; }
+    this.postMessage(message);
+  }
+
+  /**
+   * Send the tab strip: one entry per live session, marking which one is on
+   * screen and which ones are working.
+   */
+  postSessions(): void {
+    const live = this.sessionManager.listLiveSessions();
+    const liveIds = new Set(live.map((session) => session.sessionId));
+    for (const sessionId of this.transcripts.keys()) {
+      if (!liveIds.has(sessionId)) { this.transcripts.delete(sessionId); }
+    }
+    const activeId = this.sessionManager.getActiveSessionId();
+    this.postMessage({
+      type: 'sessions',
+      sessions: live.map((session, index) => ({
+        sessionId: session.sessionId,
+        label: session.title?.trim() || `Chat ${index + 1}`,
+        agentName: session.agentDisplayName,
+        active: session.sessionId === activeId,
+        busy: (this.inFlight.get(session.sessionId) ?? 0) > 0,
+      })),
+    });
+  }
+
+  /**
+   * Switch to a live session and repaint the chat from its buffered updates.
+   */
+  private handleSelectSession(sessionId: string): void {
+    const session = this.sessionManager.activateSession(sessionId);
+    if (!session) { return; }
+    this.postMessage({ type: 'loadSessionStart' });
+    for (const update of this.transcripts.get(sessionId) ?? []) {
+      this.postMessage({
+        type: 'sessionUpdate',
+        update: update.update,
+        sessionId: update.sessionId,
+      });
+    }
+    this.postMessage({ type: 'loadSessionEnd', ok: true });
+    if ((this.inFlight.get(sessionId) ?? 0) > 0) {
+      this.postMessage({ type: 'promptStart' });
+    }
+    this.postSessions();
   }
 
   /**
@@ -301,7 +385,12 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
    * Notify webview of a new active session.
    */
   notifyActiveSessionChanged(): void {
+    const activeId = this.sessionManager.getActiveSessionId();
+    if (activeId && !this.transcripts.get(activeId)?.length) {
+      this.clearChat();
+    }
     this.sendCurrentState();
+    this.postSessions();
   }
 
   /**
@@ -1117,9 +1206,62 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       opacity: 0.9;
     }
     .load-overlay .label { opacity: 0.85; }
+
+    .session-tabs {
+      display: none;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 6px 0;
+      overflow-x: auto;
+    }
+    .session-tabs.visible { display: flex; }
+    .session-tab {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-shrink: 0;
+      max-width: 160px;
+      padding: 3px 8px;
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 4px 4px 0 0;
+      background: var(--vscode-editorWidget-background);
+      color: var(--vscode-foreground);
+      font-size: 0.85em;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    .session-tab.active {
+      background: var(--vscode-tab-activeBackground, var(--vscode-editor-background));
+      border-bottom-color: transparent;
+    }
+    .session-tab .label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .session-tab .busy {
+      flex-shrink: 0;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--vscode-progressBar-background);
+    }
+    .session-tab-new {
+      flex-shrink: 0;
+      padding: 3px 8px;
+      border: 1px dashed var(--vscode-panel-border);
+      border-radius: 4px;
+      background: transparent;
+      color: var(--vscode-descriptionForeground);
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 0.85em;
+    }
   </style>
 </head>
 <body>
+  <div class="session-tabs" id="sessionTabs"></div>
+
   <div class="session-banner" id="sessionBanner">
     <span class="dot"></span>
     <div class="info">
@@ -1202,6 +1344,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     const sendStopBtn = document.getElementById('sendStopBtn');
     const statusEl = document.getElementById('status');
     const sessionBanner = document.getElementById('sessionBanner');
+    const sessionTabs = document.getElementById('sessionTabs');
     const bannerAgent = document.getElementById('bannerAgent');
     const bannerCwd = document.getElementById('bannerCwd');
     const inputArea = document.getElementById('inputArea');
@@ -1955,6 +2098,44 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       return el;
     }
 
+    // One tab per live session. A session keeps running when another tab is
+    // in front, so the strip also shows which ones are busy.
+    function renderSessionTabs(sessions) {
+      if (!sessionTabs) return;
+      sessionTabs.innerHTML = '';
+      const items = Array.isArray(sessions) ? sessions : [];
+      if (!items.length) {
+        sessionTabs.classList.remove('visible');
+        return;
+      }
+      sessionTabs.classList.add('visible');
+      for (const item of items) {
+        const tab = document.createElement('button');
+        tab.className = 'session-tab' + (item.active ? ' active' : '');
+        tab.title = item.agentName ? item.agentName + ' — ' + item.label : item.label;
+        if (item.busy) {
+          const dot = document.createElement('span');
+          dot.className = 'busy';
+          tab.appendChild(dot);
+        }
+        const label = document.createElement('span');
+        label.className = 'label';
+        label.textContent = item.label;
+        tab.appendChild(label);
+        tab.addEventListener('click', () => {
+          if (item.active) return;
+          vscode.postMessage({ type: 'selectSession', sessionId: item.sessionId });
+        });
+        sessionTabs.appendChild(tab);
+      }
+      const add = document.createElement('button');
+      add.className = 'session-tab-new';
+      add.textContent = '+';
+      add.title = 'New conversation';
+      add.addEventListener('click', () => execCmd('acp.newConversation'));
+      sessionTabs.appendChild(add);
+    }
+
     function hideEmpty() {
       if (emptyState) emptyState.style.display = 'none';
     }
@@ -2234,6 +2415,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           } else {
             showNoSession();
           }
+          break;
+
+        case 'sessions':
+          renderSessionTabs(msg.sessions);
           break;
 
         case 'promptStart':
