@@ -367,6 +367,13 @@
                 "acp"
               ],
               "env": {}
+            },
+            "MiniMax Code": {
+              "command": "mcode",
+              "args": [
+                "acp"
+              ],
+              "env": {}
             }
           }
         },
