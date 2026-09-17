@@ -4,6 +4,11 @@ All notable changes to the "vscode-acp" extension will be documented in this fil
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [Unreleased]
+
+### Fixed
+- Tool call `content` is now rendered in a collapsible details block, so command output, logs and streamed progress can be expanded under each call. Content updates replace the body, failed calls auto-expand once, and the latest snapshot is restored after a panel reload or session switch ([#69](https://github.com/formulahendry/vscode-acp/issues/69)).
+
 ## [0.2.0] - 2026-05-16
 
 ### Added
