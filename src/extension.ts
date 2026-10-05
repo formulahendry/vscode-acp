@@ -12,6 +12,7 @@ import { getAgentNames } from './config/AgentConfig';
 import { fetchRegistry } from './config/RegistryClient';
 import { log, logError, disposeChannels, getOutputChannel, getTrafficChannel } from './utils/Logger';
 import { initTelemetry, sendEvent } from './utils/TelemetryManager';
+import { CompletionService } from './utils/CompletionService';
 
 export function activate(context: vscode.ExtensionContext): void {
   log('ACP Client extension activating...');
@@ -56,6 +57,17 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   const statusBarManager = new StatusBarManager(sessionManager);
+
+  // Copilot-style ghost-text inline completion. Runs on its own hidden ACP
+  // session so completions never enter the visible chat history.
+  const completionService = new CompletionService(connectionManager, sessionUpdateHandler);
+  completionService.activate();
+  context.subscriptions.push(completionService);
+
+  // Ghost text is agent-specific: a connect/disconnect invalidates both the
+  // cached completions and the hidden session they were served from.
+  sessionManager.on('agent-connected', () => completionService.onAgentChanged());
+  sessionManager.on('agent-disconnected', () => completionService.onAgentChanged());
 
   // Notify chat webview when active session changes
   sessionManager.on('active-session-changed', () => {

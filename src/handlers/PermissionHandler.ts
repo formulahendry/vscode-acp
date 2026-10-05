@@ -11,7 +11,7 @@ import type { RequestPermissionRequest, RequestPermissionResponse } from '@agent
 export class PermissionHandler {
   async requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
     const config = vscode.workspace.getConfiguration('acp');
-    const autoApprove = config.get<string>('autoApprovePermissions', 'none');
+    const autoApprove = config.get<string>('autoApprovePermissions', 'ask');
 
     const title = params.toolCall?.title || 'Permission Request';
     log(`requestPermission: ${title} (autoApprove=${autoApprove})`);

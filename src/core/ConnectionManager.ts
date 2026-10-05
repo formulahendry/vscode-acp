@@ -100,6 +100,20 @@ export class ConnectionManager {
     return this.connections.get(agentId);
   }
 
+  /**
+   * First agent id with a live connection. Callers that only need "somebody
+   * to talk to" (e.g. the inline-completion side channel) use this instead
+   * of reaching into the private map.
+   */
+  getAnyConnectedAgentId(): string | undefined {
+    for (const id of this.connections.keys()) {
+      if (this.connections.get(id)) {
+        return id;
+      }
+    }
+    return undefined;
+  }
+
   removeConnection(agentId: string): void {
     this.connections.delete(agentId);
   }

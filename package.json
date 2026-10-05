@@ -284,7 +284,7 @@
             "GitHub Copilot": {
               "command": "npx",
               "args": [
-                "@github/copilot-language-server@latest",
+                "@github/copilot@latest",
                 "--acp"
               ],
               "env": {}
@@ -334,7 +334,52 @@
             "Codex CLI": {
               "command": "npx",
               "args": [
-                "@zed-industries/codex-acp@latest"
+                "@agentclientprotocol/codex-acp@latest"
+              ],
+              "env": {}
+            },
+            "Cline": {
+              "command": "npx",
+              "args": [
+                "cline@latest",
+                "--acp"
+              ],
+              "env": {}
+            },
+            "Factory Droid": {
+              "command": "npx",
+              "args": [
+                "droid@latest",
+                "exec",
+                "--output-format",
+                "acp-daemon"
+              ],
+              "env": {}
+            },
+            "GLM Agent": {
+              "command": "npx",
+              "args": [
+                "glm-acp-agent@latest"
+              ],
+              "env": {}
+            },
+            "MiniMax Code": {
+              "command": "npx",
+              "args": [
+                "-y",
+                "-p",
+                "@minimax-ai/code@latest",
+                "mcode",
+                "acp"
+              ],
+              "env": {}
+            },
+            "Grok Build": {
+              "command": "npx",
+              "args": [
+                "@xai-official/grok@latest",
+                "agent",
+                "stdio"
               ],
               "env": {}
             },
@@ -388,6 +433,17 @@
           "type": "boolean",
           "default": true,
           "description": "Log all ACP protocol traffic to the output channel."
+        },
+        "acp.inlineCompletion.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Copilot-style ghost-text inline completion, served by the connected ACP agent."
+        },
+        "acp.inlineCompletion.minTriggerChars": {
+          "type": "number",
+          "default": 12,
+          "minimum": 0,
+          "description": "Minimum characters of prefix on the current line before a completion is requested."
         }
       }
     }
@@ -400,7 +456,8 @@
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "lint": "eslint src --max-warnings 0",
-    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "check:completion": "tsc -p . --outDir out && node src/test/completion.check.js",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint && npm run check:completion",
     "test": "vscode-test"
   },
   "dependencies": {

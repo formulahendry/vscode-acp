@@ -1443,6 +1443,30 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     if (welcomeConnectAgent) welcomeConnectAgent.addEventListener('click', () => execCmd('acp.connectAgent'));
     if (welcomeAddAgent) welcomeAddAgent.addEventListener('click', () => execCmd('acp.addAgent'));
 
+    // --- Context usage readout (ACP usage_update) ---
+    // Declared before setProcessing() because that function reads usageReadout;
+    // a let after the use would throw a TDZ ReferenceError on the first turn end.
+    let usageReadout = '';
+    function formatTokenCount(n) {
+      return n >= 1000000 ? (n / 1000000).toFixed(1) + 'M' : n >= 1000 ? Math.round(n / 1000) + 'k' : String(n);
+    }
+    function updateUsageReadout(update) {
+      const used = Number(update.used);
+      const size = Number(update.size);
+      if (!isFinite(used)) return;
+      const parts = [formatTokenCount(used) + ' tokens'];
+      if (isFinite(size) && size > 0) {
+        parts.push('of ' + formatTokenCount(size));
+        parts.push(Math.round((used / size) * 100) + '%');
+      }
+      const cost = update.cost;
+      if (cost && isFinite(Number(cost.amount)) && Number(cost.amount) > 0) {
+        parts.push(cost.currency + ' ' + Number(cost.amount).toFixed(2));
+      }
+      usageReadout = parts.join(' · ');
+      if (!isProcessing) statusEl.textContent = usageReadout;
+    }
+
     // --- Send/Stop toggle ---
     function setProcessing(processing) {
       isProcessing = processing;
@@ -1457,7 +1481,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         sendStopBtn.textContent = 'Send';
         sendStopBtn.disabled = false;
         promptInput.disabled = false;
-        statusEl.textContent = '';
+        // Keep the usage readout after the turn: the context window is still
+        // mostly full when the agent stops working.
+        statusEl.textContent = usageReadout;
       }
     }
 
@@ -2514,11 +2540,17 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         }
 
         case 'available_commands_update':
-          availableCommands = update.availableCommands || [];
-          updatePlaceholder();
-          break;
-      }
-    }
+                  availableCommands = update.availableCommands || [];
+                  updatePlaceholder();
+                  break;
+
+                case 'usage_update':
+                  // ACP 0.21 reports context usage via usage_update. Copilot shows this
+                  // as a footer readout; without it the user has no context-window signal.
+                  updateUsageReadout(update);
+                  break;
+              }
+            }
 
     // Restore previous state before telling extension we're ready
     restoreState();
