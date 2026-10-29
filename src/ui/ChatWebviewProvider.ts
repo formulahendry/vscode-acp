@@ -1371,6 +1371,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
     // Send on Enter (Shift+Enter for newline)
     promptInput.addEventListener('keydown', (e) => {
+      if (e.isComposing || e.keyCode === 229) return;
+
       // Slash popup navigation
       if (slashPopup.classList.contains('open')) {
         if (e.key === 'ArrowDown') {
