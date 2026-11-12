@@ -1370,6 +1370,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     });
 
     // Send on Enter (Shift+Enter for newline)
+    let pendingSendAfterComposition = false;
+    let compositionTimeout;
+
     promptInput.addEventListener('keydown', (e) => {
       // Slash popup navigation
       if (slashPopup.classList.contains('open')) {
@@ -1403,13 +1406,39 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       }
 
       if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
         if (isProcessing) {
+          e.preventDefault();
           handleCancel();
-        } else {
-          handleSend();
+          return;
         }
+        if (e.isComposing || e.keyCode === 229) {
+          // IME composition is still active (e.g. Korean/Japanese/Chinese).
+          // Sending now would drop the last composing character, so defer the
+          // send until the composition has been committed (compositionend).
+          pendingSendAfterComposition = true;
+          clearTimeout(compositionTimeout);
+          compositionTimeout = setTimeout(() => {
+            pendingSendAfterComposition = false;
+          }, 500);
+          return;
+        }
+        pendingSendAfterComposition = false;
+        clearTimeout(compositionTimeout);
+        e.preventDefault();
+        handleSend();
       }
+    });
+
+    // Send once after the IME composition is committed, so the last character
+    // is included and the prompt is not sent twice.
+    promptInput.addEventListener('compositionend', () => {
+      if (!pendingSendAfterComposition) return;
+      pendingSendAfterComposition = false;
+      clearTimeout(compositionTimeout);
+      // The textarea value may not be updated yet at compositionend time.
+      setTimeout(() => {
+        if (!isProcessing) handleSend();
+      }, 0);
     });
 
     function handleSend() {
