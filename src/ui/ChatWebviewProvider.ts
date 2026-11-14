@@ -112,7 +112,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           await vscode.env.clipboard.writeText(String(message.text ?? ''));
           break;
         case 'pasteToTerminal':
-          this.pasteTextToTerminal(String(message.text ?? ''));
+          await this.pasteTextToTerminal(String(message.text ?? ''));
           break;
       }
     });
@@ -123,18 +123,41 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Paste text into the active (or first/new) VS Code terminal without auto-executing.
+   * Paste text into the active (or first/new) VS Code terminal without executing it.
+   * Uses VS Code's bracketed-paste command so multi-line snippets stay in the prompt buffer.
    */
-  private pasteTextToTerminal(text: string): void {
+  private async pasteTextToTerminal(text: string): Promise<void> {
     const cleaned = text.replace(/\r?\n+$/, '');
     if (!cleaned) {
       return;
     }
-    const terminal = vscode.window.activeTerminal
-      ?? vscode.window.terminals[0]
-      ?? vscode.window.createTerminal('ACP');
-    terminal.show(true);
-    terminal.sendText(cleaned, false);
+    const existing = vscode.window.activeTerminal ?? vscode.window.terminals[0];
+    const isNew = !existing;
+    const terminal = existing ?? vscode.window.createTerminal('ACP');
+    terminal.show(false);
+    await new Promise((resolve) => setTimeout(resolve, isNew ? 350 : 60));
+
+    const previousClipboard = await vscode.env.clipboard.readText();
+    try {
+      await vscode.env.clipboard.writeText(cleaned);
+      await vscode.commands.executeCommand('workbench.action.terminal.paste');
+    } catch (err) {
+      logError('Failed to paste into terminal', err);
+      if (!/[\r\n]/.test(cleaned)) {
+        terminal.sendText(cleaned, false);
+      } else {
+        void vscode.window.showWarningMessage(
+          'Could not paste multi-line snippet into terminal safely; snippet copied to clipboard instead.',
+        );
+        return;
+      }
+    } finally {
+      if (previousClipboard) {
+        setTimeout(() => {
+          void vscode.env.clipboard.writeText(previousClipboard);
+        }, 150);
+      }
+    }
   }
 
   /**
@@ -1129,6 +1152,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       color: var(--vscode-button-secondaryForeground);
       cursor: pointer;
       font-size: 0.9em;
+    }
+    .queue-btn[hidden] {
+      display: none;
     }
     .queue-btn:hover {
       background: var(--vscode-button-secondaryHoverBackground);
