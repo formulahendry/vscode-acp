@@ -177,10 +177,15 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  private isPromptRunning = false;
+
   /**
    * Handle a prompt sent from the webview.
    */
   private async handleSendPrompt(text: string): Promise<void> {
+    if (this.isPromptRunning) {
+      return;
+    }
     const activeId = this.sessionManager.getActiveSessionId();
     if (!activeId) {
       this.postMessage({
@@ -190,20 +195,21 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    sendEvent('chat/messageSent', {
-      agentName: this.sessionManager.getActiveAgentName() ?? '',
-    }, {
-      messageLength: text.length,
-    });
-
-    // Record the first prompt for the history store (used as a label
-    // fallback when no title is supplied by the agent).
-    this.sessionManager.recordFirstPrompt(activeId, text);
-
-    // Tell webview we're processing
-    this.postMessage({ type: 'promptStart' });
-
+    this.isPromptRunning = true;
     try {
+      sendEvent('chat/messageSent', {
+        agentName: this.sessionManager.getActiveAgentName() ?? '',
+      }, {
+        messageLength: text.length,
+      });
+
+      // Record the first prompt for the history store (used as a label
+      // fallback when no title is supplied by the agent).
+      this.sessionManager.recordFirstPrompt(activeId, text);
+
+      // Tell webview we're processing
+      this.postMessage({ type: 'promptStart' });
+
       const response = await this.sessionManager.sendPrompt(activeId, text);
       // Render the accumulated assistant text as markdown
       // The webview will have sent us the raw text via promptEnd handling
@@ -220,6 +226,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         message: e.message || 'Prompt failed',
       });
       this.postMessage({ type: 'promptEnd', stopReason: 'error' });
+    } finally {
+      this.isPromptRunning = false;
     }
   }
 
@@ -371,6 +379,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
    */
   clearChat(): void {
     this._hasChatContent = false;
+    this.isPromptRunning = false;
     this.postMessage({ type: 'clearChat' });
   }
 
@@ -1064,6 +1073,61 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       flex-shrink: 0;
     }
 
+    .queued-prompts-bar {
+      display: none;
+      flex-direction: column;
+      gap: 4px;
+      padding: 4px var(--container-padding) 0;
+    }
+    .queued-prompts-bar.visible {
+      display: flex;
+    }
+    .queued-prompt-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.12));
+      border: 1px solid var(--vscode-panel-border);
+      font-size: 0.85em;
+      color: var(--vscode-foreground);
+    }
+    .queued-prompt-text {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .queued-prompt-remove {
+      background: transparent;
+      border: none;
+      color: var(--vscode-descriptionForeground);
+      cursor: pointer;
+      padding: 0 4px;
+      font-size: 1em;
+      line-height: 1;
+    }
+    .queued-prompt-remove:hover {
+      color: var(--vscode-foreground);
+    }
+    .queue-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 12px;
+      border: 1px solid var(--vscode-button-secondaryBorder, var(--vscode-panel-border));
+      border-radius: 12px;
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+      cursor: pointer;
+      font-size: 0.9em;
+    }
+    .queue-btn:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
+
     /* Send / Stop toggle button — pill-shaped */
     .send-stop-btn {
       display: inline-flex;
@@ -1246,6 +1310,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       </div>
       <span class="toolbar-spacer"></span>
     </div>
+    <div class="queued-prompts-bar" id="queuedPromptsBar"></div>
     <div class="input-editor-wrap">
       <textarea
         id="promptInput"
@@ -1254,6 +1319,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       ></textarea>
     </div>
     <div class="input-send-row">
+      <button class="queue-btn" id="queueBtn" type="button" hidden>Queue</button>
       <button class="send-stop-btn send" id="sendStopBtn">Send</button>
     </div>
   </div>
@@ -1330,9 +1396,18 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     // --- State persistence ---
     let chatHistory = [];
     let sessionState = null;
+    let queuedPrompts = [];
+    const queuedPromptsBar = document.getElementById('queuedPromptsBar');
+    const queueBtn = document.getElementById('queueBtn');
 
     function saveState() {
-      vscode.setState({ chatHistory, sessionState, hasActiveSession });
+      vscode.setState({
+        chatHistory,
+        sessionState,
+        hasActiveSession,
+        draftText: promptInput ? promptInput.value : '',
+        queuedPrompts,
+      });
     }
 
     function restoreState() {
@@ -1342,6 +1417,12 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       chatHistory = saved.chatHistory || [];
       sessionState = saved.sessionState || null;
       hasActiveSession = saved.hasActiveSession || false;
+      queuedPrompts = Array.isArray(saved.queuedPrompts) ? saved.queuedPrompts : [];
+      if (typeof saved.draftText === 'string' && promptInput) {
+        promptInput.value = saved.draftText;
+      }
+      renderQueuedPrompts();
+      updateQueueControls();
 
       if (hasActiveSession && sessionState) {
         showSessionConnectedFromState(sessionState);
@@ -1478,20 +1559,85 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         if (isProcessing) {
-          handleCancel();
+          queueCurrentPrompt();
         } else {
           handleSend();
         }
       }
     });
 
-    function handleSend() {
-      const text = promptInput.value.trim();
-      if (!text || isProcessing) return;
+    promptInput.addEventListener('input', () => {
+      saveState();
+      updateQueueControls();
+    });
 
-      addMessage('user', text);
+    function renderQueuedPrompts() {
+      if (!queuedPromptsBar) return;
+      queuedPromptsBar.innerHTML = '';
+      if (queuedPrompts.length === 0) {
+        queuedPromptsBar.classList.remove('visible');
+        return;
+      }
+      queuedPromptsBar.classList.add('visible');
+      queuedPrompts.forEach((item, idx) => {
+        const row = document.createElement('div');
+        row.className = 'queued-prompt-item';
+
+        const textSpan = document.createElement('span');
+        textSpan.className = 'queued-prompt-text';
+        textSpan.textContent = item.text;
+        row.appendChild(textSpan);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'queued-prompt-remove';
+        removeBtn.title = 'Remove queued prompt';
+        removeBtn.textContent = '×';
+        removeBtn.addEventListener('click', () => {
+          queuedPrompts.splice(idx, 1);
+          saveState();
+          renderQueuedPrompts();
+        });
+        row.appendChild(removeBtn);
+
+        queuedPromptsBar.appendChild(row);
+      });
+    }
+
+    function updateQueueControls() {
+      if (!queueBtn) return;
+      const hasDraft = promptInput.value.trim().length > 0;
+      queueBtn.hidden = !(isProcessing && hasDraft);
+    }
+
+    function queueCurrentPrompt() {
+      const text = promptInput.value.trim();
+      if (!text) return;
+      queuedPrompts.push({ text });
       promptInput.value = '';
-      vscode.postMessage({ type: 'sendPrompt', text });
+      saveState();
+      renderQueuedPrompts();
+      updateQueueControls();
+    }
+
+    function dispatchPrompt(item) {
+      if (!item || !item.text) return;
+      addMessage('user', item.text);
+      vscode.postMessage({ type: 'sendPrompt', text: item.text });
+    }
+
+    function handleSend() {
+      if (isProcessing) {
+        queueCurrentPrompt();
+        return;
+      }
+      const text = promptInput.value.trim();
+      if (!text) return;
+
+      promptInput.value = '';
+      saveState();
+      updateQueueControls();
+      dispatchPrompt({ text });
     }
 
     function handleCancel() {
@@ -1503,6 +1649,11 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     // Wire up buttons
+    if (queueBtn) {
+      queueBtn.addEventListener('click', () => {
+        queueCurrentPrompt();
+      });
+    }
     sendStopBtn.addEventListener('click', () => {
       if (isProcessing) {
         handleCancel();
@@ -1523,15 +1674,14 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         sendStopBtn.className = 'send-stop-btn stop';
         sendStopBtn.textContent = '■ Stop';
         sendStopBtn.disabled = false;
-        promptInput.disabled = true;
         statusEl.innerHTML = '<span class="spinner"></span>';
       } else {
         sendStopBtn.className = 'send-stop-btn send';
         sendStopBtn.textContent = 'Send';
         sendStopBtn.disabled = false;
-        promptInput.disabled = false;
         statusEl.textContent = '';
       }
+      updateQueueControls();
     }
 
     // --- Session/load overlay ---
@@ -1565,6 +1715,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       }
       if (loadOverlay) loadOverlay.classList.add('visible');
       if (inputArea) inputArea.classList.add('disabled');
+      if (promptInput) promptInput.disabled = true;
       setProcessing(false);
     }
 
@@ -1574,6 +1725,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       finalizeCurrentAssistantTurn();
       if (loadOverlay) loadOverlay.classList.remove('visible');
       if (inputArea) inputArea.classList.remove('disabled');
+      if (promptInput) promptInput.disabled = !hasActiveSession;
       // Batch-render markdown for every assistant message captured during
       // the replay (avoids per-chunk render storms).
       const items = [];
@@ -2287,6 +2439,13 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     function showNoSession() {
       hasActiveSession = false;
       sessionState = null;
+      queuedPrompts = [];
+      if (promptInput) {
+        promptInput.value = '';
+        promptInput.disabled = true;
+      }
+      renderQueuedPrompts();
+      updateQueueControls();
       saveState();
       if (sessionBanner) sessionBanner.classList.remove('visible');
       if (emptyState) emptyState.style.display = '';
@@ -2347,6 +2506,18 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
             }
           }
           setProcessing(false);
+          if (
+            queuedPrompts.length > 0 &&
+            msg.stopReason !== 'cancelled' &&
+            msg.stopReason !== 'error' &&
+            hasActiveSession &&
+            !isLoadingSession
+          ) {
+            const nextItem = queuedPrompts.shift();
+            saveState();
+            renderQueuedPrompts();
+            dispatchPrompt(nextItem);
+          }
           currentAssistantEl = null;
           currentAssistantText = '';
           // Auto-collapse tool calls in completed turns
@@ -2371,6 +2542,13 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         case 'clearChat':
           chatHistory = [];
           sessionState = null;
+          queuedPrompts = [];
+          if (promptInput) {
+            promptInput.value = '';
+            promptInput.disabled = !hasActiveSession;
+          }
+          renderQueuedPrompts();
+          updateQueueControls();
           saveState();
           currentAssistantEl = null;
           currentAssistantText = '';
