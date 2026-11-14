@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { getCurrentModeId, resolvePreferredModeId } from '../config/ModeResolver';
+import { evaluatePromptPrecondition } from '../ui/ChatWebviewProvider';
 import { buildPromptContentBlocks, getImageMimeType } from '../core/PromptBuilder';
 
 suite('Extension Test Suite', () => {
@@ -151,5 +152,28 @@ suite('Extension Test Suite', () => {
 		const linked = buildPromptContentBlocks('', [fileAtt], { image: false, embeddedContext: false, audio: false });
 		assert.strictEqual(linked.length, 1);
 		assert.strictEqual(linked[0].type, 'resource_link');
+	});
+
+	test('evaluatePromptPrecondition rejects busy, session mismatch, no session, and empty', () => {
+		assert.deepStrictEqual(
+			evaluatePromptPrecondition({ isPromptRunning: false, activeSessionId: null, clientSessionId: 's1', hasContent: true }),
+			{ ok: false, reason: 'no_session', message: 'No active session. Create a session first.' },
+		);
+		assert.deepStrictEqual(
+			evaluatePromptPrecondition({ isPromptRunning: false, activeSessionId: 's2', clientSessionId: 's1', hasContent: true }),
+			{ ok: false, reason: 'session_mismatch', message: 'Active session changed before prompt was sent.' },
+		);
+		assert.deepStrictEqual(
+			evaluatePromptPrecondition({ isPromptRunning: true, activeSessionId: 's1', clientSessionId: 's1', hasContent: true }),
+			{ ok: false, reason: 'busy', message: 'A prompt is already running.' },
+		);
+		assert.deepStrictEqual(
+			evaluatePromptPrecondition({ isPromptRunning: false, activeSessionId: 's1', clientSessionId: 's1', hasContent: false }),
+			{ ok: false, reason: 'empty', message: '' },
+		);
+		assert.deepStrictEqual(
+			evaluatePromptPrecondition({ isPromptRunning: false, activeSessionId: 's1', clientSessionId: 's1', hasContent: true }),
+			{ ok: true },
+		);
 	});
 });

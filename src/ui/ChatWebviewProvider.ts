@@ -14,6 +14,54 @@ import { sendEvent } from '../utils/TelemetryManager';
  */
 const MAX_ATTACHMENTS = 5;
 
+export type PromptRejectReason = 'busy' | 'no_session' | 'session_mismatch' | 'empty';
+
+export interface PromptPreconditionResult {
+  ok: boolean;
+  reason?: PromptRejectReason;
+  message?: string;
+}
+
+/**
+ * Pure precondition check for prompt dispatch so rejection reasons are deterministic and testable.
+ */
+export function evaluatePromptPrecondition(params: {
+  isPromptRunning: boolean;
+  activeSessionId: string | null;
+  clientSessionId: string | null;
+  hasContent: boolean;
+}): PromptPreconditionResult {
+  if (!params.activeSessionId) {
+    return {
+      ok: false,
+      reason: 'no_session',
+      message: 'No active session. Create a session first.',
+    };
+  }
+  if (params.clientSessionId && params.clientSessionId !== params.activeSessionId) {
+    return {
+      ok: false,
+      reason: 'session_mismatch',
+      message: 'Active session changed before prompt was sent.',
+    };
+  }
+  if (params.isPromptRunning) {
+    return {
+      ok: false,
+      reason: 'busy',
+      message: 'A prompt is already running.',
+    };
+  }
+  if (!params.hasContent) {
+    return {
+      ok: false,
+      reason: 'empty',
+      message: '',
+    };
+  }
+  return { ok: true };
+}
+
 export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'acp-chat';
 
@@ -22,7 +70,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   private _hasChatContent = false;
   private pasteQueue: Promise<void> = Promise.resolve();
   private pendingAttachmentCount = 0;
-  private attachmentStore = new Map<string, PromptAttachment>();
+  private attachmentStore = new Map<string, { sessionId: string | null; attachment: PromptAttachment }>();
+  private runningSessionId: string | null = null;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -84,12 +133,17 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
             String(message.text ?? ''),
             Array.isArray(message.attachmentIds) ? message.attachmentIds.map(String) : [],
             Array.isArray(message.attachments) ? message.attachments : [],
+            typeof message.requestId === 'string' ? message.requestId : undefined,
+            typeof message.sessionId === 'string' ? message.sessionId : null,
           );
           break;
         case 'registerAttachment': {
           const att = message.attachment;
           if (att && typeof att.id === 'string' && att.id && typeof att.name === 'string') {
-            this.attachmentStore.set(att.id, att as PromptAttachment);
+            this.attachmentStore.set(att.id, {
+              sessionId: this.sessionManager.getActiveSessionId(),
+              attachment: att as PromptAttachment,
+            });
           }
           break;
         }
@@ -100,9 +154,19 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
             }
           }
           break;
-        case 'clearAttachments':
-          this.attachmentStore.clear();
+        case 'clearAttachments': {
+          const targetSessionId = typeof message.sessionId === 'string' ? message.sessionId : null;
+          if (targetSessionId) {
+            for (const [id, entry] of this.attachmentStore.entries()) {
+              if (entry.sessionId === targetSessionId) {
+                this.attachmentStore.delete(id);
+              }
+            }
+          } else {
+            this.attachmentStore.clear();
+          }
           break;
+        }
         case 'cancelTurn':
           await this.handleCancelTurn();
           break;
@@ -254,33 +318,40 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     text: string,
     attachmentIds: string[] = [],
     legacyAttachments: PromptAttachment[] = [],
+    requestId?: string,
+    clientSessionId: string | null = null,
   ): Promise<void> {
-    if (this.isPromptRunning) {
-      return;
-    }
     const resolvedFromStore: PromptAttachment[] = [];
     const consumedIds: string[] = [];
     for (const id of attachmentIds) {
       const stored = this.attachmentStore.get(id);
       if (stored) {
-        resolvedFromStore.push(stored);
+        resolvedFromStore.push(stored.attachment);
         consumedIds.push(id);
       }
     }
     const attachments = resolvedFromStore.length > 0 ? resolvedFromStore : legacyAttachments;
-    if (!text.trim() && attachments.length === 0) {
-      return;
-    }
     const activeId = this.sessionManager.getActiveSessionId();
-    if (!activeId) {
+    const check = evaluatePromptPrecondition({
+      isPromptRunning: this.isPromptRunning,
+      activeSessionId: activeId,
+      clientSessionId,
+      hasContent: Boolean(text.trim() || attachments.length > 0),
+    });
+    if (!check.ok || !activeId) {
       this.postMessage({
-        type: 'error',
-        message: 'No active session. Create a session first.',
+        type: 'promptRejected',
+        requestId,
+        sessionId: clientSessionId ?? activeId ?? null,
+        runningSessionId: this.runningSessionId,
+        reason: check.reason,
+        message: check.message ?? '',
       });
       return;
     }
 
     this.isPromptRunning = true;
+    this.runningSessionId = activeId;
     try {
       sendEvent('chat/messageSent', {
         agentName: this.sessionManager.getActiveAgentName() ?? '',
@@ -293,13 +364,15 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       this.sessionManager.recordFirstPrompt(activeId, text || attachments[0]?.name || '[attachment]');
 
       // Tell webview we're processing
-      this.postMessage({ type: 'promptStart' });
+      this.postMessage({ type: 'promptStart', sessionId: activeId, requestId });
 
       const response = await this.sessionManager.sendPrompt(activeId, text, attachments);
       // Render the accumulated assistant text as markdown
       // The webview will have sent us the raw text via promptEnd handling
       this.postMessage({
         type: 'promptEnd',
+        sessionId: activeId,
+        requestId,
         stopReason: response.stopReason,
         usage: (response as any).usage,
       });
@@ -310,9 +383,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         type: 'error',
         message: e.message || 'Prompt failed',
       });
-      this.postMessage({ type: 'promptEnd', stopReason: 'error' });
+      this.postMessage({ type: 'promptEnd', sessionId: activeId, requestId, stopReason: 'error' });
     } finally {
       this.isPromptRunning = false;
+      this.runningSessionId = null;
       for (const id of consumedIds) {
         this.attachmentStore.delete(id);
       }
@@ -394,6 +468,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     this.postMessage({
       type: 'state',
       activeSessionId: activeId,
+      isPromptRunning: this.isPromptRunning,
+      runningSessionId: this.runningSessionId,
       validAttachmentIds: Array.from(this.attachmentStore.keys()),
       session: session ? {
         sessionId: session.sessionId,
@@ -1578,6 +1654,11 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     let sessionState = null;
     let queuedPrompts = [];
     let pendingAttachments = [];
+    let activeSessionId = null;
+    let draftTextBySession = {};
+    let pendingAttachmentsBySession = {};
+    let queuedPromptsBySession = {};
+    const inFlightDispatches = new Map();
     let promptCapabilities = { image: false, embeddedContext: false, audio: false };
     const MAX_ATTACHMENTS = ${MAX_ATTACHMENTS};
     const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -1600,7 +1681,41 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       };
     }
 
+    function saveActiveSessionComposer() {
+      if (!activeSessionId) return;
+      draftTextBySession[activeSessionId] = promptInput ? promptInput.value : '';
+      pendingAttachmentsBySession[activeSessionId] = pendingAttachments.map(toAttachmentRef);
+      queuedPromptsBySession[activeSessionId] = queuedPrompts.map((q) => ({
+        ...q,
+        attachments: Array.isArray(q.attachments) ? q.attachments.map(toAttachmentRef) : [],
+      }));
+    }
+
+    function loadSessionComposer(nextSessionId) {
+      activeSessionId = nextSessionId || null;
+      if (activeSessionId) {
+        if (promptInput) {
+          promptInput.value = typeof draftTextBySession[activeSessionId] === 'string' ? draftTextBySession[activeSessionId] : '';
+        }
+        pendingAttachments = Array.isArray(pendingAttachmentsBySession[activeSessionId])
+          ? pendingAttachmentsBySession[activeSessionId].slice()
+          : [];
+        queuedPrompts = Array.isArray(queuedPromptsBySession[activeSessionId])
+          ? queuedPromptsBySession[activeSessionId].slice()
+          : [];
+      } else {
+        if (promptInput) promptInput.value = '';
+        pendingAttachments = [];
+        queuedPrompts = [];
+      }
+      syncPendingAttachmentCount();
+      renderAttachmentsStrip();
+      renderQueuedPrompts();
+      updateQueueControls();
+    }
+
     function saveState() {
+      saveActiveSessionComposer();
       const slimHistory = chatHistory.map((item) => {
         if (item && item.kind === 'message' && Array.isArray(item.attachments)) {
           return { ...item, attachments: item.attachments.map(toAttachmentRef) };
@@ -1611,13 +1726,30 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         ...q,
         attachments: Array.isArray(q.attachments) ? q.attachments.map(toAttachmentRef) : [],
       }));
+      const slimPendingBySession = {};
+      for (const [sid, list] of Object.entries(pendingAttachmentsBySession)) {
+        slimPendingBySession[sid] = Array.isArray(list) ? list.map(toAttachmentRef) : [];
+      }
+      const slimQueuedBySession = {};
+      for (const [sid, list] of Object.entries(queuedPromptsBySession)) {
+        slimQueuedBySession[sid] = Array.isArray(list)
+          ? list.map((q) => ({
+            ...q,
+            attachments: Array.isArray(q.attachments) ? q.attachments.map(toAttachmentRef) : [],
+          }))
+          : [];
+      }
       const statePayload = {
         chatHistory: slimHistory,
         sessionState,
         hasActiveSession,
+        activeSessionId,
         draftText: promptInput ? promptInput.value : '',
         queuedPrompts: slimQueued,
         pendingAttachments: pendingAttachments.map(toAttachmentRef),
+        draftTextBySession,
+        pendingAttachmentsBySession: slimPendingBySession,
+        queuedPromptsBySession: slimQueuedBySession,
         promptCapabilities,
       };
       try {
@@ -1652,6 +1784,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       chatHistory = saved.chatHistory || [];
       sessionState = saved.sessionState || null;
       hasActiveSession = saved.hasActiveSession || false;
+      activeSessionId = typeof saved.activeSessionId === 'string' ? saved.activeSessionId : null;
+      draftTextBySession = saved.draftTextBySession && typeof saved.draftTextBySession === 'object' ? saved.draftTextBySession : {};
+      pendingAttachmentsBySession = saved.pendingAttachmentsBySession && typeof saved.pendingAttachmentsBySession === 'object' ? saved.pendingAttachmentsBySession : {};
+      queuedPromptsBySession = saved.queuedPromptsBySession && typeof saved.queuedPromptsBySession === 'object' ? saved.queuedPromptsBySession : {};
       queuedPrompts = Array.isArray(saved.queuedPrompts) ? saved.queuedPrompts : [];
       pendingAttachments = Array.isArray(saved.pendingAttachments) ? saved.pendingAttachments : [];
       if (saved.promptCapabilities) {
@@ -2051,9 +2187,24 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       const text = item.text || '';
       const attachments = Array.isArray(item.attachments) ? item.attachments : [];
       if (!text && attachments.length === 0) return;
-      addMessage('user', text, attachments);
+      const requestId = Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+      const targetSessionId = activeSessionId;
+      isProcessing = true;
+      updateQueueControls();
+      const el = addMessage('user', text, attachments);
+      const historyEntry = chatHistory[chatHistory.length - 1];
+      inFlightDispatches.set(requestId, {
+        requestId,
+        sessionId: targetSessionId,
+        text,
+        attachments,
+        el,
+        historyEntry,
+      });
       vscode.postMessage({
         type: 'sendPrompt',
+        requestId,
+        sessionId: targetSessionId,
         text,
         attachmentIds: attachments.map((a) => a.id).filter(Boolean),
       });
@@ -2862,6 +3013,16 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     function showSessionConnected(session) {
+      const nextId = session?.sessionId ?? null;
+      if (nextId !== activeSessionId) {
+        saveActiveSessionComposer();
+        loadSessionComposer(nextId);
+        setProcessing(false);
+        currentAssistantEl = null;
+        currentAssistantText = '';
+        currentThoughtEl = null;
+        currentThoughtText = '';
+      }
       hasActiveSession = true;
       sessionState = {
         agentName: session.agentName,
@@ -2900,19 +3061,15 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     function showNoSession() {
+      saveActiveSessionComposer();
       hasActiveSession = false;
       sessionState = null;
-      queuedPrompts = [];
-      pendingAttachments = [];
-      syncPendingAttachmentCount();
+      loadSessionComposer(null);
+      setProcessing(false);
       promptCapabilities = { image: false, embeddedContext: false, audio: false };
       if (promptInput) {
-        promptInput.value = '';
         promptInput.disabled = true;
       }
-      renderQueuedPrompts();
-      renderAttachmentsStrip();
-      updateQueueControls();
       saveState();
       if (sessionBanner) sessionBanner.classList.remove('visible');
       if (emptyState) emptyState.style.display = '';
@@ -2932,9 +3089,36 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
             const validSet = new Set(msg.validAttachmentIds);
             const prevPendingLen = pendingAttachments.length;
             pendingAttachments = pendingAttachments.filter((a) => a && validSet.has(a.id));
+            let anySessionChanged = false;
             for (const q of queuedPrompts) {
               if (Array.isArray(q.attachments)) {
-                q.attachments = q.attachments.filter((a) => a && validSet.has(a.id));
+                const nextAtts = q.attachments.filter((a) => a && validSet.has(a.id));
+                if (nextAtts.length !== q.attachments.length) {
+                  q.attachments = nextAtts;
+                  anySessionChanged = true;
+                }
+              }
+            }
+            for (const [sid, list] of Object.entries(pendingAttachmentsBySession)) {
+              if (Array.isArray(list)) {
+                const nextList = list.filter((a) => a && validSet.has(a.id));
+                if (nextList.length !== list.length) {
+                  pendingAttachmentsBySession[sid] = nextList;
+                  anySessionChanged = true;
+                }
+              }
+            }
+            for (const list of Object.values(queuedPromptsBySession)) {
+              if (Array.isArray(list)) {
+                for (const q of list) {
+                  if (Array.isArray(q.attachments)) {
+                    const nextAtts = q.attachments.filter((a) => a && validSet.has(a.id));
+                    if (nextAtts.length !== q.attachments.length) {
+                      q.attachments = nextAtts;
+                      anySessionChanged = true;
+                    }
+                  }
+                }
               }
             }
             if (pendingAttachments.length !== prevPendingLen) {
@@ -2944,11 +3128,15 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
               updateQueueControls();
               saveState();
               addMessageDOM('error', 'Some pending attachments could not survive extension host restart and were removed.');
+            } else if (anySessionChanged) {
+              renderQueuedPrompts();
+              saveState();
             }
           }
           if (msg.session) {
             promptCapabilities = msg.session.promptCapabilities || { image: false, embeddedContext: false, audio: false };
             showSessionConnected(msg.session);
+            setProcessing(Boolean(msg.isPromptRunning && msg.runningSessionId === activeSessionId));
           } else {
             showNoSession();
           }
@@ -2973,6 +3161,12 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           break;
 
         case 'promptStart':
+          if (msg.requestId) {
+            inFlightDispatches.delete(msg.requestId);
+          }
+          if (msg.sessionId && msg.sessionId !== activeSessionId) {
+            break;
+          }
           setProcessing(true);
           currentAssistantEl = null;
           currentAssistantText = '';
@@ -2988,6 +3182,12 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           break;
 
         case 'promptEnd':
+          if (msg.requestId) {
+            inFlightDispatches.delete(msg.requestId);
+          }
+          if (msg.sessionId && msg.sessionId !== activeSessionId) {
+            break;
+          }
           // Finalize thought block if present
           if (currentThoughtText) {
             finalizeThought();
@@ -3015,7 +3215,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
             msg.stopReason !== 'cancelled' &&
             msg.stopReason !== 'error' &&
             hasActiveSession &&
-            !isLoadingSession
+            !isLoadingSession &&
+            (!msg.sessionId || msg.sessionId === activeSessionId)
           ) {
             const nextItem = queuedPrompts.shift();
             saveState();
@@ -3043,13 +3244,80 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           thoughtEndTime = null;
           break;
 
+        case 'promptRejected': {
+          const entry = msg.requestId ? inFlightDispatches.get(msg.requestId) : null;
+          if (msg.requestId) {
+            inFlightDispatches.delete(msg.requestId);
+          }
+          if (entry) {
+            if (entry.el && entry.el.parentNode) {
+              entry.el.parentNode.removeChild(entry.el);
+            }
+            const histIdx = chatHistory.indexOf(entry.historyEntry);
+            if (histIdx >= 0) {
+              chatHistory.splice(histIdx, 1);
+            }
+            const targetSid = entry.sessionId;
+            if (msg.reason === 'busy') {
+              const item = { text: entry.text, attachments: entry.attachments };
+              if (targetSid === activeSessionId) {
+                queuedPrompts.unshift(item);
+                renderQueuedPrompts();
+                setProcessing(msg.runningSessionId === activeSessionId);
+                if (msg.runningSessionId !== activeSessionId) {
+                  addMessageDOM('error', 'Another session is currently busy; prompt moved to queue.');
+                }
+                updateQueueControls();
+              } else if (targetSid) {
+                const q = Array.isArray(queuedPromptsBySession[targetSid]) ? queuedPromptsBySession[targetSid] : [];
+                q.unshift(item);
+                queuedPromptsBySession[targetSid] = q;
+              }
+            } else {
+              if (targetSid === activeSessionId) {
+                if (promptInput && entry.text) {
+                  promptInput.value = promptInput.value ? (entry.text + '\n' + promptInput.value) : entry.text;
+                }
+                if (Array.isArray(entry.attachments) && entry.attachments.length > 0) {
+                  pendingAttachments = entry.attachments.concat(pendingAttachments);
+                  renderAttachmentsStrip();
+                }
+                setProcessing(false);
+                syncPendingAttachmentCount();
+                updateQueueControls();
+              } else if (targetSid) {
+                if (entry.text) {
+                  const prevDraft = typeof draftTextBySession[targetSid] === 'string' ? draftTextBySession[targetSid] : '';
+                  draftTextBySession[targetSid] = prevDraft ? (entry.text + '\n' + prevDraft) : entry.text;
+                }
+                if (Array.isArray(entry.attachments) && entry.attachments.length > 0) {
+                  const prevAtts = Array.isArray(pendingAttachmentsBySession[targetSid]) ? pendingAttachmentsBySession[targetSid] : [];
+                  pendingAttachmentsBySession[targetSid] = entry.attachments.concat(prevAtts);
+                }
+              }
+              if (msg.message) {
+                addMessageDOM('error', msg.message);
+              }
+            }
+            flushSaveState();
+          }
+          break;
+        }
+
         case 'clearChat':
           chatHistory = [];
           sessionState = null;
           queuedPrompts = [];
           pendingAttachments = [];
           attachmentPreviewCache.clear();
-          vscode.postMessage({ type: 'clearAttachments' });
+          if (activeSessionId) {
+            delete draftTextBySession[activeSessionId];
+            delete pendingAttachmentsBySession[activeSessionId];
+            delete queuedPromptsBySession[activeSessionId];
+            vscode.postMessage({ type: 'clearAttachments', sessionId: activeSessionId });
+          } else {
+            vscode.postMessage({ type: 'clearAttachments' });
+          }
           syncPendingAttachmentCount();
           if (promptInput) {
             promptInput.value = '';
@@ -3483,7 +3751,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     if (attachments.length > 0) {
       this.pendingAttachmentCount += attachments.length;
       for (const att of attachments) {
-        this.attachmentStore.set(att.id, att);
+        this.attachmentStore.set(att.id, { sessionId: activeId, attachment: att });
       }
       const refs = attachments.map(({ id, kind, name, mimeType, uri }) => ({
         id,
