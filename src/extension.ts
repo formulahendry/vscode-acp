@@ -468,12 +468,12 @@ export function activate(context: vscode.ExtensionContext): void {
   // Attach File
   const attachFileCmd = vscode.commands.registerCommand('acp.attachFile', async () => {
     const uris = await vscode.window.showOpenDialog({
-      canSelectMany: false,
+      canSelectMany: true,
       openLabel: 'Attach',
-      title: 'Attach File to Chat',
+      title: 'Attach File(s) to Chat',
     });
     if (uris && uris.length > 0) {
-      chatWebviewProvider.attachFile(uris[0]);
+      await chatWebviewProvider.attachFiles(uris);
     }
   });
 

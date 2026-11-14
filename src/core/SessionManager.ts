@@ -20,6 +20,11 @@ import { ConnectionManager, ConnectionInfo } from './ConnectionManager';
 import { SessionUpdateHandler } from '../handlers/SessionUpdateHandler';
 import { SessionHistoryStore } from './SessionHistoryStore';
 import { getCurrentModeId, resolvePreferredModeId } from '../config/ModeResolver';
+import {
+  buildPromptContentBlocks,
+  PromptAttachment,
+  PromptCapabilityFlags,
+} from './PromptBuilder';
 import { getAgentConfigs } from '../config/AgentConfig';
 import { log, logError } from '../utils/Logger';
 import { sendEvent, sendError } from '../utils/TelemetryManager';
@@ -471,9 +476,25 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
+   * Read prompt capabilities advertised by the agent during initialize.
+   */
+  getPromptCapabilities(session?: SessionInfo | null): PromptCapabilityFlags {
+    const pc = session?.initResponse?.agentCapabilities?.promptCapabilities;
+    return {
+      image: !!pc?.image,
+      embeddedContext: !!pc?.embeddedContext,
+      audio: !!pc?.audio,
+    };
+  }
+
+  /**
    * Send a prompt to the active session.
    */
-  async sendPrompt(sessionId: string, text: string): Promise<PromptResponse> {
+  async sendPrompt(
+    sessionId: string,
+    text: string,
+    attachments: PromptAttachment[] = [],
+  ): Promise<PromptResponse> {
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
@@ -484,11 +505,13 @@ export class SessionManager extends EventEmitter {
       throw new Error(`No connection for agent: ${session.agentId}`);
     }
 
-    log(`sendPrompt: session=${sessionId}, text="${text.substring(0, 50)}..."`);
+    log(`sendPrompt: session=${sessionId}, text="${text.substring(0, 50)}...", attachments=${attachments.length}`);
 
-    const prompt: ContentBlock[] = [
-      { type: 'text', text },
-    ];
+    const prompt: ContentBlock[] = buildPromptContentBlocks(
+      text,
+      attachments,
+      this.getPromptCapabilities(session),
+    );
 
     const response = await connInfo.connection.prompt({
       sessionId,

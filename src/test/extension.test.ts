@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { getCurrentModeId, resolvePreferredModeId } from '../config/ModeResolver';
+import { buildPromptContentBlocks, getImageMimeType } from '../core/PromptBuilder';
 
 suite('Extension Test Suite', () => {
 	vscode.window.showInformationMessage('Start all tests.');
@@ -83,5 +84,48 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(resolvePreferredModeId('plan', modes, null), 'plan');
 		assert.strictEqual(resolvePreferredModeId('plan mode', modes, null), 'plan');
 		assert.strictEqual(resolvePreferredModeId('missing', modes, null), null);
+	});
+
+	test('getImageMimeType detects supported image extensions', () => {
+		assert.strictEqual(getImageMimeType('shot.png'), 'image/png');
+		assert.strictEqual(getImageMimeType('photo.JPG'), 'image/jpeg');
+		assert.strictEqual(getImageMimeType('anim.gif'), 'image/gif');
+		assert.strictEqual(getImageMimeType('pic.webp'), 'image/webp');
+		assert.strictEqual(getImageMimeType('notes.md'), null);
+	});
+
+	test('buildPromptContentBlocks enforces image capability and resource fallback', () => {
+		const imgAtt = {
+			id: '1',
+			kind: 'image' as const,
+			name: 'shot.png',
+			mimeType: 'image/png',
+			data: 'AAAA',
+		};
+		assert.throws(
+			() => buildPromptContentBlocks('hi', [imgAtt], { image: false, embeddedContext: false, audio: false }),
+			/does not support image attachments/,
+		);
+
+		const withImg = buildPromptContentBlocks('describe', [imgAtt], { image: true, embeddedContext: false, audio: false });
+		assert.strictEqual(withImg.length, 2);
+		assert.strictEqual(withImg[0].type, 'image');
+		assert.strictEqual(withImg[1].type, 'text');
+
+		const fileAtt = {
+			id: '2',
+			kind: 'file' as const,
+			name: 'foo.ts',
+			mimeType: 'text/typescript',
+			uri: 'file:///foo.ts',
+			text: 'const x = 1;',
+		};
+		const embedded = buildPromptContentBlocks('', [fileAtt], { image: false, embeddedContext: true, audio: false });
+		assert.strictEqual(embedded.length, 1);
+		assert.strictEqual(embedded[0].type, 'resource');
+
+		const linked = buildPromptContentBlocks('', [fileAtt], { image: false, embeddedContext: false, audio: false });
+		assert.strictEqual(linked.length, 1);
+		assert.strictEqual(linked[0].type, 'resource_link');
 	});
 });
