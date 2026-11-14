@@ -384,6 +384,16 @@
           "default": "",
           "description": "Default working directory for agent sessions. Leave empty to use the current workspace folder."
         },
+        "acp.defaultMode": {
+          "type": "string",
+          "default": "auto",
+          "description": "Preferred agent execution mode ID or name (e.g., auto, plan, accept-edits) applied to new sessions when supported by the agent. Leave empty to use each agent's default."
+        },
+        "acp.rememberMode": {
+          "type": "boolean",
+          "default": true,
+          "description": "Remember the last selected mode per agent and restore it for new sessions."
+        },
         "acp.logTraffic": {
           "type": "boolean",
           "default": true,

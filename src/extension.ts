@@ -35,6 +35,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // session/list).
   const historyStore = new SessionHistoryStore(context.workspaceState);
   sessionManager.setHistoryStore(historyStore);
+  sessionManager.setStateStore(context.globalState);
   context.subscriptions.push({ dispose: () => historyStore.dispose() });
 
   // --- UI ---
@@ -101,6 +102,12 @@ export function activate(context: vscode.ExtensionContext): void {
   sessionManager.on('session-info-changed', (sessionId: string, update: any) => {
     if (sessionId !== sessionManager.getActiveSessionId()) { return; }
     chatWebviewProvider.notifySessionInfoUpdate(update?.title);
+  });
+
+  // Config options update — forward to chat webview when active session matches.
+  sessionManager.on('config-options-changed', (sessionId: string, options: any) => {
+    if (sessionId !== sessionManager.getActiveSessionId()) { return; }
+    chatWebviewProvider.notifyConfigOptionsUpdate(options);
   });
 
   // --- Commands ---
