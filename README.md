@@ -42,7 +42,6 @@ The extension comes with default configurations for:
 |-------|---------|
 | GitHub Copilot | `npx @github/copilot-language-server@latest --acp` |
 | Claude Code | `npx @agentclientprotocol/claude-agent-acp@latest` |
-| Gemini CLI | `npx @google/gemini-cli@latest --experimental-acp` |
 | Qwen Code | `npx @qwen-code/qwen-code@latest --acp --experimental-skills` |
 | Auggie CLI | `npx @augmentcode/auggie@latest --acp` |
 | Qoder CLI | `npx @qoder-ai/qodercli@latest --acp` |
@@ -51,10 +50,13 @@ The extension comes with default configurations for:
 | OpenClaw | `npx openclaw acp` |
 | [Kiro CLI](https://kiro.dev/docs/cli/acp/) | `kiro-cli acp` |
 | [Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/acp) | `hermes acp` |
+| [Antigravity](https://antigravity.google/docs/ide/extensions/acp) | `agy acp` |
 
 You can add custom agent configurations in settings.
 
 > **Note on Hermes Agent**: Hermes is a Python package, not an npm package. Install it via the [Hermes Quickstart](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart) (Linux/macOS/WSL2 only — Windows requires [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install)). Make sure `hermes` is on your `PATH` and launch VS Code from the same shell/venv. Configure credentials with `hermes model`.
+
+> **Note on Antigravity**: Antigravity requires the native `agy` CLI (v1.5.0+, not an npm package). Install on macOS/Linux (`curl -fsSL https://antigravity.google/cli/install.sh | bash`) or Windows (`irm https://antigravity.google/cli/install.ps1 | iex`), make sure `agy` is on your `PATH`, and authenticate via `agy` or `agy acp --login`. If you previously customized `acp.agents` in VS Code settings, reset `acp.agents` or replace `"Gemini CLI"` manually.
 
 ## Extension Settings
 

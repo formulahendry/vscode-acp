@@ -1,7 +1,7 @@
 {
   "name": "acp-client",
   "displayName": "ACP Client",
-  "description": "Agent Client Protocol client for VS Code — connect to GitHub Copilot, Claude Code, Gemini CLI, Qwen Code, Codex CLI, OpenCode, OpenClaw, Kiro CLI, Hermes Agent, and any ACP-compatible AI coding agent",
+  "description": "Agent Client Protocol client for VS Code — connect to GitHub Copilot, Claude Code, Qwen Code, Codex CLI, OpenCode, OpenClaw, Kiro CLI, Hermes Agent, Antigravity, and any ACP-compatible AI coding agent",
   "version": "0.2.0",
   "publisher": "formulahendry",
   "license": "MIT",
@@ -296,14 +296,6 @@
               ],
               "env": {}
             },
-            "Gemini CLI": {
-              "command": "npx",
-              "args": [
-                "@google/gemini-cli@latest",
-                "--experimental-acp"
-              ],
-              "env": {}
-            },
             "Qwen Code": {
               "command": "npx",
               "args": [
@@ -363,6 +355,13 @@
             },
             "Hermes Agent": {
               "command": "hermes",
+              "args": [
+                "acp"
+              ],
+              "env": {}
+            },
+            "Antigravity": {
+              "command": "agy",
               "args": [
                 "acp"
               ],
