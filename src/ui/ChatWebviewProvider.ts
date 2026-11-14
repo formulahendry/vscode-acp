@@ -106,12 +106,33 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           this.postMessage({ type: 'markdownRendered', items: rendered });
           break;
         }
+        case 'copyCode':
+          await vscode.env.clipboard.writeText(String(message.text ?? ''));
+          break;
+        case 'pasteToTerminal':
+          this.pasteTextToTerminal(String(message.text ?? ''));
+          break;
       }
     });
 
     webviewView.onDidDispose(() => {
       this.view = undefined;
     });
+  }
+
+  /**
+   * Paste text into the active (or first/new) VS Code terminal without auto-executing.
+   */
+  private pasteTextToTerminal(text: string): void {
+    const cleaned = text.replace(/\r?\n+$/, '');
+    if (!cleaned) {
+      return;
+    }
+    const terminal = vscode.window.activeTerminal
+      ?? vscode.window.terminals[0]
+      ?? vscode.window.createTerminal('ACP');
+    terminal.show(true);
+    terminal.sendText(cleaned, false);
   }
 
   /**
@@ -479,6 +500,58 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       background: none;
       padding: 0;
       border-radius: 0;
+    }
+    .code-block-wrap {
+      margin: 0.5em 0;
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 4px;
+      overflow: hidden;
+      background: var(--vscode-textCodeBlock-background);
+    }
+    .code-block-wrap pre {
+      margin: 0;
+      border: none;
+      border-radius: 0;
+    }
+    .code-block-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 3px 8px;
+      background: var(--vscode-editorGroupHeader-tabsBackground, rgba(128, 128, 128, 0.12));
+      border-bottom: 1px solid var(--vscode-panel-border);
+      font-size: 0.8em;
+      color: var(--vscode-descriptionForeground);
+    }
+    .code-block-lang {
+      font-family: var(--vscode-editor-font-family);
+      text-transform: lowercase;
+      user-select: none;
+    }
+    .code-block-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-left: auto;
+    }
+    .code-action-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 3px;
+      color: var(--vscode-descriptionForeground);
+      cursor: pointer;
+      padding: 2px 4px;
+      line-height: 1;
+    }
+    .code-action-btn:hover {
+      color: var(--vscode-foreground);
+      background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+    }
+    .code-action-btn.copied {
+      color: var(--vscode-testing-iconPassed, #73c991);
     }
     .message.assistant.md-rendered ul,
     .message.assistant.md-rendered ol {
@@ -2377,6 +2450,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
             if (el) {
               el.classList.add('md-rendered');
               el.innerHTML = item.html;
+              enhanceCodeBlocks(el);
             }
           }
           scrollToBottom();
@@ -2384,6 +2458,77 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         }
       }
     });
+
+    function enhanceCodeBlocks(containerEl) {
+      const pres = containerEl.querySelectorAll('pre');
+      for (const pre of pres) {
+        if (pre.parentElement && pre.parentElement.classList.contains('code-block-wrap')) {
+          continue;
+        }
+        const codeEl = pre.querySelector('code');
+        const rawText = (codeEl || pre).textContent || '';
+
+        let lang = '';
+        if (codeEl && codeEl.className) {
+          const match = codeEl.className.match(/language-([\w-]+)/);
+          if (match) {
+            lang = match[1];
+          }
+        }
+
+        const wrap = document.createElement('div');
+        wrap.className = 'code-block-wrap';
+
+        const header = document.createElement('div');
+        header.className = 'code-block-header';
+
+        const langSpan = document.createElement('span');
+        langSpan.className = 'code-block-lang';
+        langSpan.textContent = lang;
+        header.appendChild(langSpan);
+
+        const actions = document.createElement('div');
+        actions.className = 'code-block-actions';
+
+        const copySvg = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4 4h1V2a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-2v1h2a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v2zm-2 1a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H2zm0 1h7a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z"/></svg>';
+        const checkSvg = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0z"/></svg>';
+        const terminalSvg = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V3zm1 0v10h12V3H2zm2.354 2.646a.5.5 0 1 0-.708.708L5.293 8 3.646 9.646a.5.5 0 0 0 .708.708l2-2a.5.5 0 0 0 0-.708l-2-2zM7.5 10a.5.5 0 0 0 0 1h4a.5.5 0 0 0 0-1h-4z"/></svg>';
+
+        const copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.className = 'code-action-btn';
+        copyBtn.title = 'Copy code';
+        copyBtn.setAttribute('aria-label', 'Copy code');
+        copyBtn.innerHTML = copySvg;
+        copyBtn.addEventListener('click', () => {
+          vscode.postMessage({ type: 'copyCode', text: rawText });
+          copyBtn.innerHTML = checkSvg;
+          copyBtn.classList.add('copied');
+          setTimeout(() => {
+            copyBtn.innerHTML = copySvg;
+            copyBtn.classList.remove('copied');
+          }, 1500);
+        });
+
+        const termBtn = document.createElement('button');
+        termBtn.type = 'button';
+        termBtn.className = 'code-action-btn';
+        termBtn.title = 'Paste to Terminal';
+        termBtn.setAttribute('aria-label', 'Paste to Terminal');
+        termBtn.innerHTML = terminalSvg;
+        termBtn.addEventListener('click', () => {
+          vscode.postMessage({ type: 'pasteToTerminal', text: rawText });
+        });
+
+        actions.appendChild(copyBtn);
+        actions.appendChild(termBtn);
+        header.appendChild(actions);
+
+        pre.parentNode.insertBefore(wrap, pre);
+        wrap.appendChild(header);
+        wrap.appendChild(pre);
+      }
+    }
 
     function handleUpdate(update) {
       if (!update) return;
