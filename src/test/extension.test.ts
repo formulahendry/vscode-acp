@@ -81,9 +81,33 @@ suite('Extension Test Suite', () => {
 			],
 		};
 		assert.strictEqual(getCurrentModeId(modes, null), 'default');
+		assert.strictEqual(getCurrentModeId(modes, []), 'default');
 		assert.strictEqual(resolvePreferredModeId('plan', modes, null), 'plan');
+		assert.strictEqual(resolvePreferredModeId('plan', modes, []), 'plan');
 		assert.strictEqual(resolvePreferredModeId('plan mode', modes, null), 'plan');
 		assert.strictEqual(resolvePreferredModeId('missing', modes, null), null);
+	});
+
+	test('ModeResolver enforces exclusive configOptions contract when non-empty', () => {
+		const modes: any = {
+			currentModeId: 'default',
+			availableModes: [
+				{ id: 'default', name: 'Default' },
+				{ id: 'plan', name: 'Plan Mode' },
+			],
+		};
+		const nonModeConfigOptions: any[] = [
+			{
+				id: 'model',
+				category: 'model',
+				type: 'select',
+				currentValue: 'sonnet',
+				options: [{ value: 'sonnet', name: 'Sonnet' }],
+			},
+		];
+		assert.strictEqual(getCurrentModeId(modes, nonModeConfigOptions), null);
+		assert.strictEqual(resolvePreferredModeId('default', modes, nonModeConfigOptions), null);
+		assert.strictEqual(resolvePreferredModeId('plan', modes, nonModeConfigOptions), null);
 	});
 
 	test('getImageMimeType detects supported image extensions', () => {

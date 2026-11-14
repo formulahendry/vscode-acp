@@ -33,9 +33,9 @@ export function getCurrentModeId(
   modes: SessionModeState | null,
   configOptions: SessionConfigOption[] | null,
 ): string | null {
-  const modeOpt = configOptions?.find((o) => o.category === 'mode' && o.type === 'select');
-  if (modeOpt && modeOpt.type === 'select') {
-    return modeOpt.currentValue ?? null;
+  if (Array.isArray(configOptions) && configOptions.length > 0) {
+    const modeOpt = configOptions.find((o) => o.category === 'mode' && o.type === 'select');
+    return modeOpt && modeOpt.type === 'select' ? (modeOpt.currentValue ?? null) : null;
   }
   return modes?.currentModeId ?? null;
 }
@@ -55,8 +55,11 @@ export function resolvePreferredModeId(
   }
   const targetLower = target.toLowerCase();
 
-  const modeOpt = configOptions?.find((o) => o.category === 'mode' && o.type === 'select');
-  if (modeOpt && modeOpt.type === 'select') {
+  if (Array.isArray(configOptions) && configOptions.length > 0) {
+    const modeOpt = configOptions.find((o) => o.category === 'mode' && o.type === 'select');
+    if (!modeOpt || modeOpt.type !== 'select') {
+      return null;
+    }
     const flat = flattenSelectOptions(modeOpt.options);
     const exact = flat.find((o) => o.value === target);
     if (exact) {
