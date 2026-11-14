@@ -19,6 +19,12 @@ import { AgentManager } from './AgentManager';
 import { ConnectionManager, ConnectionInfo } from './ConnectionManager';
 import { SessionUpdateHandler } from '../handlers/SessionUpdateHandler';
 import { SessionHistoryStore } from './SessionHistoryStore';
+import { getCurrentModeId, resolvePreferredModeId } from '../config/ModeResolver';
+import {
+  buildPromptContentBlocks,
+  PromptAttachment,
+  PromptCapabilityFlags,
+} from './PromptBuilder';
 import { getAgentConfigs } from '../config/AgentConfig';
 import { log, logError } from '../utils/Logger';
 import { sendEvent, sendError } from '../utils/TelemetryManager';
@@ -106,9 +112,25 @@ export class SessionManager extends EventEmitter {
     super();
   }
 
+  private stateStore: vscode.Memento | null = null;
+
   /** Wire in the persistent session-history store (called once at startup). */
   setHistoryStore(store: SessionHistoryStore): void {
     this.historyStore = store;
+  }
+
+  /** Wire in extension globalState memento for persisting per-agent preferences. */
+  setStateStore(store: vscode.Memento): void {
+    this.stateStore = store;
+  }
+
+  private savePreferredMode(agentName: string, modeId: string): void {
+    if (!this.stateStore) { return; }
+    const remember = vscode.workspace.getConfiguration('acp').get<boolean>('rememberMode', true);
+    if (!remember) { return; }
+    const saved = { ...this.stateStore.get<Record<string, string>>('acp.savedModes', {}) };
+    saved[agentName] = modeId;
+    void this.stateStore.update('acp.savedModes', saved);
   }
 
   /** Public accessor for downstream UI. */
@@ -338,6 +360,24 @@ export class SessionManager extends EventEmitter {
     this.sessions.set(sessionInfo.sessionId, sessionInfo);
     this.drainPending(sessionInfo);
 
+    // Apply remembered or default mode on new sessions when supported
+    const config = vscode.workspace.getConfiguration('acp');
+    const rememberMode = config.get<boolean>('rememberMode', true);
+    const savedModes = this.stateStore?.get<Record<string, string>>('acp.savedModes', {}) ?? {};
+    const remembered = rememberMode ? savedModes[agentName] : undefined;
+    const desired = remembered || config.get<string>('defaultMode', 'auto').trim();
+    if (desired) {
+      const targetModeId = resolvePreferredModeId(desired, sessionInfo.modes, sessionInfo.configOptions);
+      const currentModeId = getCurrentModeId(sessionInfo.modes, sessionInfo.configOptions);
+      if (targetModeId && targetModeId !== currentModeId) {
+        try {
+          await this.setMode(sessionInfo.sessionId, targetModeId, false);
+        } catch (err) {
+          console.warn(`[ACP] Failed to apply preferred mode "${targetModeId}" for ${agentName}:`, err);
+        }
+      }
+    }
+
     // Capture in the local history store so it appears in the tree.
     this.historyStore?.upsertNew(agentName, cwd, sessionInfo.sessionId);
 
@@ -436,9 +476,25 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
+   * Read prompt capabilities advertised by the agent during initialize.
+   */
+  getPromptCapabilities(session?: SessionInfo | null): PromptCapabilityFlags {
+    const pc = session?.initResponse?.agentCapabilities?.promptCapabilities;
+    return {
+      image: !!pc?.image,
+      embeddedContext: !!pc?.embeddedContext,
+      audio: !!pc?.audio,
+    };
+  }
+
+  /**
    * Send a prompt to the active session.
    */
-  async sendPrompt(sessionId: string, text: string): Promise<PromptResponse> {
+  async sendPrompt(
+    sessionId: string,
+    text: string,
+    attachments: PromptAttachment[] = [],
+  ): Promise<PromptResponse> {
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
@@ -449,11 +505,13 @@ export class SessionManager extends EventEmitter {
       throw new Error(`No connection for agent: ${session.agentId}`);
     }
 
-    log(`sendPrompt: session=${sessionId}, text="${text.substring(0, 50)}..."`);
+    log(`sendPrompt: session=${sessionId}, text="${text.substring(0, 50)}...", attachments=${attachments.length}`);
 
-    const prompt: ContentBlock[] = [
-      { type: 'text', text },
-    ];
+    const prompt: ContentBlock[] = buildPromptContentBlocks(
+      text,
+      attachments,
+      this.getPromptCapabilities(session),
+    );
 
     const response = await connInfo.connection.prompt({
       sessionId,
@@ -486,7 +544,7 @@ export class SessionManager extends EventEmitter {
    * `mode` — this keeps user keybindings working across agents that have
    * migrated to the new API.
    */
-  async setMode(sessionId: string, modeId: string): Promise<void> {
+  async setMode(sessionId: string, modeId: string, persist = true): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) { return; }
 
@@ -495,7 +553,7 @@ export class SessionManager extends EventEmitter {
     if (session.configOptions && session.configOptions.length > 0) {
       const modeOpt = session.configOptions.find(o => o.category === 'mode');
       if (modeOpt) {
-        await this.setConfigOption(sessionId, modeOpt.id, modeId);
+        await this.setConfigOption(sessionId, modeOpt.id, modeId, persist);
         return;
       }
     }
@@ -508,6 +566,9 @@ export class SessionManager extends EventEmitter {
     // Update local state
     if (session.modes) {
       session.modes.currentModeId = modeId;
+    }
+    if (persist) {
+      this.savePreferredMode(session.agentName, modeId);
     }
     this.emit('mode-changed', sessionId, modeId);
   }
@@ -549,7 +610,7 @@ export class SessionManager extends EventEmitter {
    * replace our local copy so that cascading changes (e.g. changing the
    * model adjusts thought-level options) are reflected.
    */
-  async setConfigOption(sessionId: string, configId: string, value: string): Promise<SessionConfigOption[] | null> {
+  async setConfigOption(sessionId: string, configId: string, value: string, persist = true): Promise<SessionConfigOption[] | null> {
     const session = this.sessions.get(sessionId);
     if (!session) { return null; }
 
@@ -564,6 +625,12 @@ export class SessionManager extends EventEmitter {
 
     const options = (response as any)?.configOptions ?? null;
     this.applyConfigOptions(sessionId, options);
+    if (persist) {
+      const changedOpt = (options ?? session.configOptions)?.find((o: SessionConfigOption) => o.id === configId);
+      if (changedOpt?.category === 'mode') {
+        this.savePreferredMode(session.agentName, value);
+      }
+    }
     return options;
   }
 

@@ -6,6 +6,11 @@ A [Visual Studio Code extension](https://marketplace.visualstudio.com/items?item
 
 ## Features
 
+- **Code Block Actions**: Copy code to clipboard or paste directly into the integrated terminal (without auto-executing) from any rendered code block.
+- **Default & Remembered Mode**: Configure a preferred execution mode (`acp.defaultMode`, defaulting to `auto`) and remember per-agent mode selections (`acp.rememberMode`).
+- **Unblocked Input & Prompt Queue**: Continue typing and queue follow-up prompts while an agent turn or compaction is running.
+- **Image & File Attachments**: Paste screenshots (`Ctrl+V`), drag-and-drop, or attach files/images via ACP `ContentBlock` (`image`, `resource`, `resource_link`).
+
 - **Multi-Agent Support**: Connect to 11 pre-configured ACP agents or add your own
 - **Single-Agent Focus**: One agent active at a time — seamlessly switch between agents
 - **Per-Agent Session List**: Each agent in the Agents view is expandable into its previous sessions. Click a session to restore its history in the chat. Backed by `session/list` when the agent supports it, or by a local per-workspace cache otherwise.
@@ -63,6 +68,8 @@ You can add custom agent configurations in settings.
 | `acp.agents` | *(11 agents)* | Agent configurations. Each key is the agent name, value has `command`, `args`, and `env`. |
 | `acp.autoApprovePermissions` | `ask` | How agent permission requests are handled: `ask` or `allowAll`. |
 | `acp.defaultWorkingDirectory` | `""` | Default working directory for agent sessions. Empty uses current workspace. |
+| `acp.defaultMode` | `"auto"` | Preferred agent execution mode ID or name applied to new sessions when supported. |
+| `acp.rememberMode` | `true` | Remember the last selected mode per agent and restore it for new sessions. |
 | `acp.logTraffic` | `true` | Log all ACP protocol traffic to the ACP Traffic output channel. |
 
 ## Commands
