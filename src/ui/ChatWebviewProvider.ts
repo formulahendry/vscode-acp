@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { marked } from 'marked';
+import * as path from 'path';
 import { SessionManager } from '../core/SessionManager';
+import { PromptAttachment, getImageMimeType, guessMimeType } from '../core/PromptBuilder';
 import { SessionUpdateHandler, SessionUpdateListener } from '../handlers/SessionUpdateHandler';
 import type { SessionNotification } from '@agentclientprotocol/sdk';
 import { logError } from '../utils/Logger';
@@ -73,7 +75,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       switch (message.type) {
         case 'sendPrompt':
           this._hasChatContent = true;
-          await this.handleSendPrompt(message.text);
+          await this.handleSendPrompt(String(message.text ?? ''), Array.isArray(message.attachments) ? message.attachments : []);
           break;
         case 'cancelTurn':
           await this.handleCancelTurn();
@@ -106,12 +108,56 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           this.postMessage({ type: 'markdownRendered', items: rendered });
           break;
         }
+        case 'copyCode':
+          await vscode.env.clipboard.writeText(String(message.text ?? ''));
+          break;
+        case 'pasteToTerminal':
+          await this.pasteTextToTerminal(String(message.text ?? ''));
+          break;
       }
     });
 
     webviewView.onDidDispose(() => {
       this.view = undefined;
     });
+  }
+
+  /**
+   * Paste text into the active (or first/new) VS Code terminal without executing it.
+   * Uses VS Code's bracketed-paste command so multi-line snippets stay in the prompt buffer.
+   */
+  private async pasteTextToTerminal(text: string): Promise<void> {
+    const cleaned = text.replace(/\r?\n+$/, '');
+    if (!cleaned) {
+      return;
+    }
+    const existing = vscode.window.activeTerminal ?? vscode.window.terminals[0];
+    const isNew = !existing;
+    const terminal = existing ?? vscode.window.createTerminal('ACP');
+    terminal.show(false);
+    await new Promise((resolve) => setTimeout(resolve, isNew ? 350 : 60));
+
+    const previousClipboard = await vscode.env.clipboard.readText();
+    try {
+      await vscode.env.clipboard.writeText(cleaned);
+      await vscode.commands.executeCommand('workbench.action.terminal.paste');
+    } catch (err) {
+      logError('Failed to paste into terminal', err);
+      if (!/[\r\n]/.test(cleaned)) {
+        terminal.sendText(cleaned, false);
+      } else {
+        void vscode.window.showWarningMessage(
+          'Could not paste multi-line snippet into terminal safely; snippet copied to clipboard instead.',
+        );
+        return;
+      }
+    } finally {
+      if (previousClipboard) {
+        setTimeout(() => {
+          void vscode.env.clipboard.writeText(previousClipboard);
+        }, 150);
+      }
+    }
   }
 
   /**
@@ -156,10 +202,18 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  private isPromptRunning = false;
+
   /**
    * Handle a prompt sent from the webview.
    */
-  private async handleSendPrompt(text: string): Promise<void> {
+  private async handleSendPrompt(text: string, attachments: PromptAttachment[] = []): Promise<void> {
+    if (this.isPromptRunning) {
+      return;
+    }
+    if (!text.trim() && attachments.length === 0) {
+      return;
+    }
     const activeId = this.sessionManager.getActiveSessionId();
     if (!activeId) {
       this.postMessage({
@@ -169,21 +223,22 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    sendEvent('chat/messageSent', {
-      agentName: this.sessionManager.getActiveAgentName() ?? '',
-    }, {
-      messageLength: text.length,
-    });
-
-    // Record the first prompt for the history store (used as a label
-    // fallback when no title is supplied by the agent).
-    this.sessionManager.recordFirstPrompt(activeId, text);
-
-    // Tell webview we're processing
-    this.postMessage({ type: 'promptStart' });
-
+    this.isPromptRunning = true;
     try {
-      const response = await this.sessionManager.sendPrompt(activeId, text);
+      sendEvent('chat/messageSent', {
+        agentName: this.sessionManager.getActiveAgentName() ?? '',
+      }, {
+        messageLength: text.length,
+      });
+
+      // Record the first prompt for the history store (used as a label
+      // fallback when no title is supplied by the agent).
+      this.sessionManager.recordFirstPrompt(activeId, text || attachments[0]?.name || '[attachment]');
+
+      // Tell webview we're processing
+      this.postMessage({ type: 'promptStart' });
+
+      const response = await this.sessionManager.sendPrompt(activeId, text, attachments);
       // Render the accumulated assistant text as markdown
       // The webview will have sent us the raw text via promptEnd handling
       this.postMessage({
@@ -199,6 +254,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         message: e.message || 'Prompt failed',
       });
       this.postMessage({ type: 'promptEnd', stopReason: 'error' });
+    } finally {
+      this.isPromptRunning = false;
     }
   }
 
@@ -286,6 +343,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         models: session.models,
         configOptions: session.configOptions,
         availableCommands: session.availableCommands,
+        promptCapabilities: this.sessionManager.getPromptCapabilities(session),
       } : null,
     });
   }
@@ -350,6 +408,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
    */
   clearChat(): void {
     this._hasChatContent = false;
+    this.isPromptRunning = false;
     this.postMessage({ type: 'clearChat' });
   }
 
@@ -371,7 +430,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src data: ${webview.cspSource};">
   <title>ACP Chat</title>
   <style>
     :root {
@@ -479,6 +538,58 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       background: none;
       padding: 0;
       border-radius: 0;
+    }
+    .code-block-wrap {
+      margin: 0.5em 0;
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 4px;
+      overflow: hidden;
+      background: var(--vscode-textCodeBlock-background);
+    }
+    .code-block-wrap pre {
+      margin: 0;
+      border: none;
+      border-radius: 0;
+    }
+    .code-block-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 3px 8px;
+      background: var(--vscode-editorGroupHeader-tabsBackground, rgba(128, 128, 128, 0.12));
+      border-bottom: 1px solid var(--vscode-panel-border);
+      font-size: 0.8em;
+      color: var(--vscode-descriptionForeground);
+    }
+    .code-block-lang {
+      font-family: var(--vscode-editor-font-family);
+      text-transform: lowercase;
+      user-select: none;
+    }
+    .code-block-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-left: auto;
+    }
+    .code-action-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 3px;
+      color: var(--vscode-descriptionForeground);
+      cursor: pointer;
+      padding: 2px 4px;
+      line-height: 1;
+    }
+    .code-action-btn:hover {
+      color: var(--vscode-foreground);
+      background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+    }
+    .code-action-btn.copied {
+      color: var(--vscode-testing-iconPassed, #73c991);
     }
     .message.assistant.md-rendered ul,
     .message.assistant.md-rendered ol {
@@ -991,6 +1102,149 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       flex-shrink: 0;
     }
 
+    .queued-prompts-bar {
+      display: none;
+      flex-direction: column;
+      gap: 4px;
+      padding: 4px var(--container-padding) 0;
+    }
+    .queued-prompts-bar.visible {
+      display: flex;
+    }
+    .queued-prompt-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.12));
+      border: 1px solid var(--vscode-panel-border);
+      font-size: 0.85em;
+      color: var(--vscode-foreground);
+    }
+    .queued-prompt-text {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .queued-prompt-remove {
+      background: transparent;
+      border: none;
+      color: var(--vscode-descriptionForeground);
+      cursor: pointer;
+      padding: 0 4px;
+      font-size: 1em;
+      line-height: 1;
+    }
+    .queued-prompt-remove:hover {
+      color: var(--vscode-foreground);
+    }
+    .queue-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 12px;
+      border: 1px solid var(--vscode-button-secondaryBorder, var(--vscode-panel-border));
+      border-radius: 12px;
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+      cursor: pointer;
+      font-size: 0.9em;
+    }
+    .queue-btn[hidden] {
+      display: none;
+    }
+    .queue-btn:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
+    .attachments-strip {
+      display: none;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 6px var(--container-padding) 0;
+    }
+    .attachments-strip.visible {
+      display: flex;
+    }
+    .attachment-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.14));
+      border: 1px solid var(--vscode-panel-border);
+      font-size: 0.82em;
+      max-width: 180px;
+    }
+    .attachment-chip img {
+      width: 24px;
+      height: 24px;
+      object-fit: cover;
+      border-radius: 3px;
+    }
+    .attachment-chip-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .attachment-chip-remove {
+      background: transparent;
+      border: none;
+      color: var(--vscode-descriptionForeground);
+      cursor: pointer;
+      padding: 0 2px;
+      line-height: 1;
+    }
+    .attachment-chip-remove:hover {
+      color: var(--vscode-foreground);
+    }
+    .attach-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      color: var(--vscode-descriptionForeground);
+      cursor: pointer;
+      padding: 4px 6px;
+      margin-right: auto;
+    }
+    .attach-btn:hover {
+      color: var(--vscode-foreground);
+      background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+    }
+    .input-area.drag-over {
+      outline: 2px dashed var(--vscode-focusBorder);
+      outline-offset: -2px;
+    }
+    .message-attachments {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+    .message-attachment-img {
+      max-width: 220px;
+      max-height: 160px;
+      border-radius: 4px;
+      border: 1px solid var(--vscode-panel-border);
+      object-fit: contain;
+    }
+    .message-attachment-file {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.14));
+      border: 1px solid var(--vscode-panel-border);
+      font-size: 0.82em;
+    }
+
     /* Send / Stop toggle button — pill-shaped */
     .send-stop-btn {
       display: inline-flex;
@@ -1173,6 +1427,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       </div>
       <span class="toolbar-spacer"></span>
     </div>
+    <div class="attachments-strip" id="attachmentsStrip"></div>
+    <div class="queued-prompts-bar" id="queuedPromptsBar"></div>
     <div class="input-editor-wrap">
       <textarea
         id="promptInput"
@@ -1181,6 +1437,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       ></textarea>
     </div>
     <div class="input-send-row">
+      <button class="attach-btn" id="attachBtn" type="button" title="Attach file or image" aria-label="Attach file or image">📎</button>
+      <button class="queue-btn" id="queueBtn" type="button" hidden>Queue</button>
       <button class="send-stop-btn send" id="sendStopBtn">Send</button>
     </div>
   </div>
@@ -1257,9 +1515,44 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     // --- State persistence ---
     let chatHistory = [];
     let sessionState = null;
+    let queuedPrompts = [];
+    let pendingAttachments = [];
+    let promptCapabilities = { image: false, embeddedContext: false, audio: false };
+    const MAX_ATTACHMENTS = 5;
+    const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+    const queuedPromptsBar = document.getElementById('queuedPromptsBar');
+    const queueBtn = document.getElementById('queueBtn');
+    const attachmentsStrip = document.getElementById('attachmentsStrip');
+    const attachBtn = document.getElementById('attachBtn');
 
     function saveState() {
-      vscode.setState({ chatHistory, sessionState, hasActiveSession });
+      const statePayload = {
+        chatHistory,
+        sessionState,
+        hasActiveSession,
+        draftText: promptInput ? promptInput.value : '',
+        queuedPrompts,
+        promptCapabilities,
+      };
+      try {
+        vscode.setState(statePayload);
+      } catch {
+        // Fallback: strip base64 image data if state quota is exceeded
+        const slimHistory = chatHistory.map((item) => {
+          if (item && item.kind === 'message' && Array.isArray(item.attachments)) {
+            return {
+              ...item,
+              attachments: item.attachments.map((a) => ({ ...a, data: undefined })),
+            };
+          }
+          return item;
+        });
+        try {
+          vscode.setState({ ...statePayload, chatHistory: slimHistory });
+        } catch {
+          // Ignore if still over quota
+        }
+      }
     }
 
     function restoreState() {
@@ -1269,6 +1562,16 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       chatHistory = saved.chatHistory || [];
       sessionState = saved.sessionState || null;
       hasActiveSession = saved.hasActiveSession || false;
+      queuedPrompts = Array.isArray(saved.queuedPrompts) ? saved.queuedPrompts : [];
+      if (saved.promptCapabilities) {
+        promptCapabilities = saved.promptCapabilities;
+      }
+      if (typeof saved.draftText === 'string' && promptInput) {
+        promptInput.value = saved.draftText;
+      }
+      renderQueuedPrompts();
+      renderAttachmentsStrip();
+      updateQueueControls();
 
       if (hasActiveSession && sessionState) {
         showSessionConnectedFromState(sessionState);
@@ -1279,7 +1582,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         const item = chatHistory[i];
         switch (item.kind) {
           case 'message':
-            addMessageDOM(item.role, item.text);
+            addMessageDOM(item.role, item.text, item.attachments);
             if (item.role === 'assistant') {
               assistantItems.push({ index: i, text: item.text });
             }
@@ -1405,20 +1708,220 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         if (isProcessing) {
-          handleCancel();
+          queueCurrentPrompt();
         } else {
           handleSend();
         }
       }
     });
 
-    function handleSend() {
-      const text = promptInput.value.trim();
-      if (!text || isProcessing) return;
+    promptInput.addEventListener('input', () => {
+      saveState();
+      updateQueueControls();
+    });
 
-      addMessage('user', text);
+    function renderQueuedPrompts() {
+      if (!queuedPromptsBar) return;
+      queuedPromptsBar.innerHTML = '';
+      if (queuedPrompts.length === 0) {
+        queuedPromptsBar.classList.remove('visible');
+        return;
+      }
+      queuedPromptsBar.classList.add('visible');
+      queuedPrompts.forEach((item, idx) => {
+        const row = document.createElement('div');
+        row.className = 'queued-prompt-item';
+
+        const textSpan = document.createElement('span');
+        textSpan.className = 'queued-prompt-text';
+        const attNames = Array.isArray(item.attachments) && item.attachments.length > 0
+          ? item.attachments.map((a) => '📎 ' + (a.name || 'attachment')).join(', ')
+          : '';
+        textSpan.textContent = item.text
+          ? (attNames ? item.text + ' (' + attNames + ')' : item.text)
+          : attNames;
+        row.appendChild(textSpan);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'queued-prompt-remove';
+        removeBtn.title = 'Remove queued prompt';
+        removeBtn.textContent = '×';
+        removeBtn.addEventListener('click', () => {
+          queuedPrompts.splice(idx, 1);
+          saveState();
+          renderQueuedPrompts();
+        });
+        row.appendChild(removeBtn);
+
+        queuedPromptsBar.appendChild(row);
+      });
+    }
+
+    function renderAttachmentsStrip() {
+      if (!attachmentsStrip) return;
+      attachmentsStrip.innerHTML = '';
+      if (pendingAttachments.length === 0) {
+        attachmentsStrip.classList.remove('visible');
+        return;
+      }
+      attachmentsStrip.classList.add('visible');
+      pendingAttachments.forEach((att, idx) => {
+        const chip = document.createElement('div');
+        chip.className = 'attachment-chip';
+        if (att.kind === 'image' && att.data) {
+          const img = document.createElement('img');
+          img.src = 'data:' + att.mimeType + ';base64,' + att.data;
+          img.alt = att.name;
+          chip.appendChild(img);
+        }
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'attachment-chip-name';
+        nameSpan.textContent = att.name;
+        nameSpan.title = att.name;
+        chip.appendChild(nameSpan);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'attachment-chip-remove';
+        removeBtn.textContent = '×';
+        removeBtn.title = 'Remove attachment';
+        removeBtn.addEventListener('click', () => {
+          pendingAttachments.splice(idx, 1);
+          renderAttachmentsStrip();
+          updateQueueControls();
+        });
+        chip.appendChild(removeBtn);
+        attachmentsStrip.appendChild(chip);
+      });
+    }
+
+    function addPendingAttachments(items) {
+      for (const att of items) {
+        if (pendingAttachments.length >= MAX_ATTACHMENTS) {
+          addMessageDOM('error', 'Maximum of ' + MAX_ATTACHMENTS + ' attachments per prompt.');
+          break;
+        }
+        pendingAttachments.push(att);
+      }
+      renderAttachmentsStrip();
+      updateQueueControls();
+    }
+
+    function readImageFile(file, fallbackName) {
+      if (!promptCapabilities.image) {
+        addMessageDOM('error', 'Active agent does not support image attachments.');
+        return;
+      }
+      if (file.size > MAX_IMAGE_BYTES) {
+        addMessageDOM('error', 'Image "' + (file.name || fallbackName) + '" exceeds the 10 MB limit.');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = typeof reader.result === 'string' ? reader.result : '';
+        const commaIdx = result.indexOf(',');
+        const base64 = commaIdx >= 0 ? result.slice(commaIdx + 1) : '';
+        if (!base64) return;
+        addPendingAttachments([{
+          id: Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+          kind: 'image',
+          name: file.name || fallbackName,
+          mimeType: file.type || 'image/png',
+          data: base64,
+        }]);
+      };
+      reader.readAsDataURL(file);
+    }
+
+    promptInput.addEventListener('paste', (e) => {
+      const items = e.clipboardData && e.clipboardData.items;
+      if (!items) return;
+      let handledImage = false;
+      for (const item of items) {
+        if (item.type && item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            handledImage = true;
+            readImageFile(file, 'pasted-image.png');
+          }
+        }
+      }
+      if (handledImage) {
+        e.preventDefault();
+      }
+    });
+
+    if (inputArea) {
+      inputArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        inputArea.classList.add('drag-over');
+      });
+      inputArea.addEventListener('dragleave', () => {
+        inputArea.classList.remove('drag-over');
+      });
+      inputArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        inputArea.classList.remove('drag-over');
+        const files = e.dataTransfer && e.dataTransfer.files;
+        if (!files || files.length === 0) return;
+        for (const file of files) {
+          if (file.type && file.type.startsWith('image/')) {
+            readImageFile(file, 'dropped-image.png');
+          }
+        }
+      });
+    }
+
+    if (attachBtn) {
+      attachBtn.addEventListener('click', () => {
+        execCmd('acp.attachFile');
+      });
+    }
+
+    function updateQueueControls() {
+      if (!queueBtn) return;
+      const hasDraft = promptInput.value.trim().length > 0 || pendingAttachments.length > 0;
+      queueBtn.hidden = !(isProcessing && hasDraft);
+    }
+
+    function queueCurrentPrompt() {
+      const text = promptInput.value.trim();
+      const attachments = pendingAttachments.slice();
+      if (!text && attachments.length === 0) return;
+      queuedPrompts.push({ text, attachments });
       promptInput.value = '';
-      vscode.postMessage({ type: 'sendPrompt', text });
+      pendingAttachments = [];
+      saveState();
+      renderQueuedPrompts();
+      renderAttachmentsStrip();
+      updateQueueControls();
+    }
+
+    function dispatchPrompt(item) {
+      if (!item) return;
+      const text = item.text || '';
+      const attachments = Array.isArray(item.attachments) ? item.attachments : [];
+      if (!text && attachments.length === 0) return;
+      addMessage('user', text, attachments);
+      vscode.postMessage({ type: 'sendPrompt', text, attachments });
+    }
+
+    function handleSend() {
+      if (isProcessing) {
+        queueCurrentPrompt();
+        return;
+      }
+      const text = promptInput.value.trim();
+      const attachments = pendingAttachments.slice();
+      if (!text && attachments.length === 0) return;
+
+      promptInput.value = '';
+      pendingAttachments = [];
+      saveState();
+      renderAttachmentsStrip();
+      updateQueueControls();
+      dispatchPrompt({ text, attachments });
     }
 
     function handleCancel() {
@@ -1430,6 +1933,11 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     // Wire up buttons
+    if (queueBtn) {
+      queueBtn.addEventListener('click', () => {
+        queueCurrentPrompt();
+      });
+    }
     sendStopBtn.addEventListener('click', () => {
       if (isProcessing) {
         handleCancel();
@@ -1450,15 +1958,14 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         sendStopBtn.className = 'send-stop-btn stop';
         sendStopBtn.textContent = '■ Stop';
         sendStopBtn.disabled = false;
-        promptInput.disabled = true;
         statusEl.innerHTML = '<span class="spinner"></span>';
       } else {
         sendStopBtn.className = 'send-stop-btn send';
         sendStopBtn.textContent = 'Send';
         sendStopBtn.disabled = false;
-        promptInput.disabled = false;
         statusEl.textContent = '';
       }
+      updateQueueControls();
     }
 
     // --- Session/load overlay ---
@@ -1492,6 +1999,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       }
       if (loadOverlay) loadOverlay.classList.add('visible');
       if (inputArea) inputArea.classList.add('disabled');
+      if (promptInput) promptInput.disabled = true;
       setProcessing(false);
     }
 
@@ -1501,6 +2009,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       finalizeCurrentAssistantTurn();
       if (loadOverlay) loadOverlay.classList.remove('visible');
       if (inputArea) inputArea.classList.remove('disabled');
+      if (promptInput) promptInput.disabled = !hasActiveSession;
       // Batch-render markdown for every assistant message captured during
       // the replay (avoids per-chunk render storms).
       const items = [];
@@ -1939,17 +2448,40 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     document.addEventListener('click', () => closePickers());
 
     // --- Messages ---
-    function addMessage(role, text) {
-      chatHistory.push({ kind: 'message', role, text });
+    function addMessage(role, text, attachments) {
+      chatHistory.push({ kind: 'message', role, text, ...(attachments && attachments.length > 0 ? { attachments } : {}) });
       saveState();
-      return addMessageDOM(role, text);
+      return addMessageDOM(role, text, attachments);
     }
 
-    function addMessageDOM(role, text) {
+    function addMessageDOM(role, text, attachments) {
       hideEmpty();
       const el = document.createElement('div');
       el.className = 'message ' + role;
-      el.textContent = text;
+      if (Array.isArray(attachments) && attachments.length > 0) {
+        const attWrap = document.createElement('div');
+        attWrap.className = 'message-attachments';
+        for (const att of attachments) {
+          if (att.kind === 'image' && att.data) {
+            const img = document.createElement('img');
+            img.className = 'message-attachment-img';
+            img.src = 'data:' + att.mimeType + ';base64,' + att.data;
+            img.alt = att.name || 'image';
+            attWrap.appendChild(img);
+          } else {
+            const badge = document.createElement('span');
+            badge.className = 'message-attachment-file';
+            badge.textContent = '📎 ' + (att.name || 'file');
+            attWrap.appendChild(badge);
+          }
+        }
+        el.appendChild(attWrap);
+      }
+      if (text) {
+        const textNode = document.createElement('div');
+        textNode.textContent = text;
+        el.appendChild(textNode);
+      }
       messagesEl.appendChild(el);
       scrollToBottom();
       return el;
@@ -2214,6 +2746,16 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     function showNoSession() {
       hasActiveSession = false;
       sessionState = null;
+      queuedPrompts = [];
+      pendingAttachments = [];
+      promptCapabilities = { image: false, embeddedContext: false, audio: false };
+      if (promptInput) {
+        promptInput.value = '';
+        promptInput.disabled = true;
+      }
+      renderQueuedPrompts();
+      renderAttachmentsStrip();
+      updateQueueControls();
       saveState();
       if (sessionBanner) sessionBanner.classList.remove('visible');
       if (emptyState) emptyState.style.display = '';
@@ -2230,9 +2772,28 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       switch (msg.type) {
         case 'state':
           if (msg.session) {
+            promptCapabilities = msg.session.promptCapabilities || { image: false, embeddedContext: false, audio: false };
             showSessionConnected(msg.session);
           } else {
             showNoSession();
+          }
+          break;
+
+        case 'attachmentsAdded':
+          if (Array.isArray(msg.attachments)) {
+            addPendingAttachments(msg.attachments);
+          }
+          break;
+
+        case 'file-attached':
+          if (msg.name) {
+            addPendingAttachments([{
+              id: Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+              kind: 'file',
+              name: msg.name,
+              mimeType: 'text/plain',
+              uri: msg.path,
+            }]);
           }
           break;
 
@@ -2274,6 +2835,18 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
             }
           }
           setProcessing(false);
+          if (
+            queuedPrompts.length > 0 &&
+            msg.stopReason !== 'cancelled' &&
+            msg.stopReason !== 'error' &&
+            hasActiveSession &&
+            !isLoadingSession
+          ) {
+            const nextItem = queuedPrompts.shift();
+            saveState();
+            renderQueuedPrompts();
+            dispatchPrompt(nextItem);
+          }
           currentAssistantEl = null;
           currentAssistantText = '';
           // Auto-collapse tool calls in completed turns
@@ -2298,6 +2871,15 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         case 'clearChat':
           chatHistory = [];
           sessionState = null;
+          queuedPrompts = [];
+          pendingAttachments = [];
+          if (promptInput) {
+            promptInput.value = '';
+            promptInput.disabled = !hasActiveSession;
+          }
+          renderQueuedPrompts();
+          renderAttachmentsStrip();
+          updateQueueControls();
           saveState();
           currentAssistantEl = null;
           currentAssistantText = '';
@@ -2377,6 +2959,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
             if (el) {
               el.classList.add('md-rendered');
               el.innerHTML = item.html;
+              enhanceCodeBlocks(el);
             }
           }
           scrollToBottom();
@@ -2384,6 +2967,77 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         }
       }
     });
+
+    function enhanceCodeBlocks(containerEl) {
+      const pres = containerEl.querySelectorAll('pre');
+      for (const pre of pres) {
+        if (pre.parentElement && pre.parentElement.classList.contains('code-block-wrap')) {
+          continue;
+        }
+        const codeEl = pre.querySelector('code');
+        const rawText = (codeEl || pre).textContent || '';
+
+        let lang = '';
+        if (codeEl && codeEl.className) {
+          const match = codeEl.className.match(/language-([\w-]+)/);
+          if (match) {
+            lang = match[1];
+          }
+        }
+
+        const wrap = document.createElement('div');
+        wrap.className = 'code-block-wrap';
+
+        const header = document.createElement('div');
+        header.className = 'code-block-header';
+
+        const langSpan = document.createElement('span');
+        langSpan.className = 'code-block-lang';
+        langSpan.textContent = lang;
+        header.appendChild(langSpan);
+
+        const actions = document.createElement('div');
+        actions.className = 'code-block-actions';
+
+        const copySvg = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4 4h1V2a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-2v1h2a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v2zm-2 1a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H2zm0 1h7a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z"/></svg>';
+        const checkSvg = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0z"/></svg>';
+        const terminalSvg = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V3zm1 0v10h12V3H2zm2.354 2.646a.5.5 0 1 0-.708.708L5.293 8 3.646 9.646a.5.5 0 0 0 .708.708l2-2a.5.5 0 0 0 0-.708l-2-2zM7.5 10a.5.5 0 0 0 0 1h4a.5.5 0 0 0 0-1h-4z"/></svg>';
+
+        const copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.className = 'code-action-btn';
+        copyBtn.title = 'Copy code';
+        copyBtn.setAttribute('aria-label', 'Copy code');
+        copyBtn.innerHTML = copySvg;
+        copyBtn.addEventListener('click', () => {
+          vscode.postMessage({ type: 'copyCode', text: rawText });
+          copyBtn.innerHTML = checkSvg;
+          copyBtn.classList.add('copied');
+          setTimeout(() => {
+            copyBtn.innerHTML = copySvg;
+            copyBtn.classList.remove('copied');
+          }, 1500);
+        });
+
+        const termBtn = document.createElement('button');
+        termBtn.type = 'button';
+        termBtn.className = 'code-action-btn';
+        termBtn.title = 'Paste to Terminal';
+        termBtn.setAttribute('aria-label', 'Paste to Terminal');
+        termBtn.innerHTML = terminalSvg;
+        termBtn.addEventListener('click', () => {
+          vscode.postMessage({ type: 'pasteToTerminal', text: rawText });
+        });
+
+        actions.appendChild(copyBtn);
+        actions.appendChild(termBtn);
+        header.appendChild(actions);
+
+        pre.parentNode.insertBefore(wrap, pre);
+        wrap.appendChild(header);
+        wrap.appendChild(pre);
+      }
+    }
 
     function handleUpdate(update) {
       if (!update) return;
@@ -2435,10 +3089,41 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
               last.text += content.text;
               const allUser = messagesEl.querySelectorAll('.message.user');
               const el = allUser[allUser.length - 1];
-              if (el) el.textContent = last.text;
+              if (el) {
+                const textDiv = el.querySelector('div:not(.message-attachments)');
+                if (textDiv) {
+                  textDiv.textContent = last.text;
+                } else {
+                  const d = document.createElement('div');
+                  d.textContent = last.text;
+                  el.appendChild(d);
+                }
+              }
             } else {
               addMessage('user', content.text);
             }
+          } else if (content && content.type === 'image' && content.data) {
+            finalizeCurrentAssistantTurn();
+            addMessage('user', '', [{
+              id: 'replay-' + Date.now(),
+              kind: 'image',
+              name: 'image',
+              mimeType: content.mimeType || 'image/png',
+              data: content.data,
+            }]);
+          } else if (content && (content.type === 'resource' || content.type === 'resource_link')) {
+            finalizeCurrentAssistantTurn();
+            const uri = content.type === 'resource' ? content.resource?.uri : content.uri;
+            const name = (content.type === 'resource_link' && content.name)
+              ? content.name
+              : (uri ? uri.split('/').pop() : 'file');
+            addMessage('user', '', [{
+              id: 'replay-' + Date.now(),
+              kind: 'file',
+              name,
+              mimeType: 'text/plain',
+              uri,
+            }]);
           }
           break;
         }
@@ -2531,17 +3216,81 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * Attach one or more file URIs — read image/text payloads and send to webview.
+   */
+  async attachFiles(uris: vscode.Uri[]): Promise<void> {
+    if (!this.view || uris.length === 0) {
+      return;
+    }
+    const activeId = this.sessionManager.getActiveSessionId();
+    const session = activeId ? this.sessionManager.getSession(activeId) : null;
+    const caps = this.sessionManager.getPromptCapabilities(session);
+
+    const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+    const MAX_TEXT_BYTES = 256 * 1024;
+    const attachments: PromptAttachment[] = [];
+
+    for (const uri of uris) {
+      const name = path.basename(uri.fsPath || uri.path) || uri.toString();
+      const imageMime = getImageMimeType(uri.fsPath || uri.path);
+      try {
+        const stat = await vscode.workspace.fs.stat(uri);
+        if (imageMime) {
+          if (!caps.image) {
+            void vscode.window.showWarningMessage(
+              `Active agent does not support image attachments (skipped "${name}").`,
+            );
+            continue;
+          }
+          if (stat.size > MAX_IMAGE_BYTES) {
+            void vscode.window.showWarningMessage(
+              `Image "${name}" exceeds the 10 MB limit and was skipped.`,
+            );
+            continue;
+          }
+          const bytes = await vscode.workspace.fs.readFile(uri);
+          attachments.push({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            kind: 'image',
+            name,
+            mimeType: imageMime,
+            data: Buffer.from(bytes).toString('base64'),
+            uri: uri.toString(),
+          });
+        } else {
+          let text: string | undefined;
+          if (caps.embeddedContext && stat.size <= MAX_TEXT_BYTES) {
+            const bytes = await vscode.workspace.fs.readFile(uri);
+            const buf = Buffer.from(bytes);
+            if (!buf.includes(0)) {
+              text = buf.toString('utf8');
+            }
+          }
+          attachments.push({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            kind: 'file',
+            name,
+            mimeType: guessMimeType(uri.fsPath || uri.path),
+            uri: uri.toString(),
+            ...(text !== undefined ? { text } : {}),
+          });
+        }
+      } catch (err) {
+        logError(`Failed to attach "${name}"`, err);
+      }
+    }
+
+    if (attachments.length > 0) {
+      this.view.webview.postMessage({ type: 'attachmentsAdded', attachments });
+      this.view.show?.(true);
+    }
+  }
+
+  /**
    * Attach a file URI — notify the webview to include it in the next prompt.
    */
   attachFile(uri: vscode.Uri): void {
-    if (this.view) {
-      this.view.webview.postMessage({
-        type: 'file-attached',
-        path: uri.fsPath,
-        name: uri.fsPath.split(/[\\/]/).pop() || uri.fsPath,
-      });
-      this.view.show?.(true);
-    }
+    void this.attachFiles([uri]);
   }
 
   dispose(): void {
