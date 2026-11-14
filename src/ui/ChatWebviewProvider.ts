@@ -12,12 +12,16 @@ import { sendEvent } from '../utils/TelemetryManager';
  * WebviewViewProvider for the ACP chat sidebar.
  * Renders chat messages, tool calls, plans, and handles user input.
  */
+const MAX_ATTACHMENTS = 5;
+
 export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'acp-chat';
 
   private view?: vscode.WebviewView;
   private updateListener: SessionUpdateListener;
   private _hasChatContent = false;
+  private pasteQueue: Promise<void> = Promise.resolve();
+  private pendingAttachmentCount = 0;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -114,6 +118,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         case 'pasteToTerminal':
           await this.pasteTextToTerminal(String(message.text ?? ''));
           break;
+        case 'syncPendingAttachments':
+          this.pendingAttachmentCount = Math.max(0, Number(message.count) || 0);
+          break;
       }
     });
 
@@ -126,11 +133,18 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
    * Paste text into the active (or first/new) VS Code terminal without executing it.
    * Uses VS Code's bracketed-paste command so multi-line snippets stay in the prompt buffer.
    */
-  private async pasteTextToTerminal(text: string): Promise<void> {
+  private pasteTextToTerminal(text: string): Promise<void> {
     const cleaned = text.replace(/\r?\n+$/, '');
     if (!cleaned) {
-      return;
+      return Promise.resolve();
     }
+    const next = this.pasteQueue.then(() => this.executePasteTextToTerminal(cleaned));
+    // Keep queue alive even if a paste attempt fails.
+    this.pasteQueue = next.catch(() => undefined);
+    return next;
+  }
+
+  private async executePasteTextToTerminal(cleaned: string): Promise<void> {
     const existing = vscode.window.activeTerminal ?? vscode.window.terminals[0];
     const isNew = !existing;
     const terminal = existing ?? vscode.window.createTerminal('ACP');
@@ -138,6 +152,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     await new Promise((resolve) => setTimeout(resolve, isNew ? 350 : 60));
 
     const previousClipboard = await vscode.env.clipboard.readText();
+    let leftOnClipboard = false;
     try {
       await vscode.env.clipboard.writeText(cleaned);
       await vscode.commands.executeCommand('workbench.action.terminal.paste');
@@ -146,16 +161,22 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       if (!/[\r\n]/.test(cleaned)) {
         terminal.sendText(cleaned, false);
       } else {
+        leftOnClipboard = true;
         void vscode.window.showWarningMessage(
           'Could not paste multi-line snippet into terminal safely; snippet copied to clipboard instead.',
         );
         return;
       }
     } finally {
-      if (previousClipboard) {
-        setTimeout(() => {
-          void vscode.env.clipboard.writeText(previousClipboard);
-        }, 150);
+      if (!leftOnClipboard) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        try {
+          if ((await vscode.env.clipboard.readText()) === cleaned) {
+            await vscode.env.clipboard.writeText(previousClipboard);
+          }
+        } catch {
+          // Ignore clipboard restore failures.
+        }
       }
     }
   }
@@ -1518,7 +1539,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     let queuedPrompts = [];
     let pendingAttachments = [];
     let promptCapabilities = { image: false, embeddedContext: false, audio: false };
-    const MAX_ATTACHMENTS = 5;
+    const MAX_ATTACHMENTS = ${MAX_ATTACHMENTS};
     const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
     const queuedPromptsBar = document.getElementById('queuedPromptsBar');
     const queueBtn = document.getElementById('queueBtn');
@@ -1788,12 +1809,17 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         removeBtn.title = 'Remove attachment';
         removeBtn.addEventListener('click', () => {
           pendingAttachments.splice(idx, 1);
+          syncPendingAttachmentCount();
           renderAttachmentsStrip();
           updateQueueControls();
         });
         chip.appendChild(removeBtn);
         attachmentsStrip.appendChild(chip);
       });
+    }
+
+    function syncPendingAttachmentCount() {
+      vscode.postMessage({ type: 'syncPendingAttachments', count: pendingAttachments.length });
     }
 
     function addPendingAttachments(items) {
@@ -1804,6 +1830,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         }
         pendingAttachments.push(att);
       }
+      syncPendingAttachmentCount();
       renderAttachmentsStrip();
       updateQueueControls();
     }
@@ -1837,15 +1864,25 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     promptInput.addEventListener('paste', (e) => {
       const items = e.clipboardData && e.clipboardData.items;
       if (!items) return;
+      let remainingSlots = Math.max(0, MAX_ATTACHMENTS - pendingAttachments.length);
       let handledImage = false;
+      let skippedExcess = false;
       for (const item of items) {
         if (item.type && item.type.startsWith('image/')) {
           const file = item.getAsFile();
           if (file) {
             handledImage = true;
+            if (remainingSlots <= 0) {
+              skippedExcess = true;
+              continue;
+            }
+            remainingSlots--;
             readImageFile(file, 'pasted-image.png');
           }
         }
+      }
+      if (skippedExcess) {
+        addMessageDOM('error', 'Maximum of ' + MAX_ATTACHMENTS + ' attachments per prompt.');
       }
       if (handledImage) {
         e.preventDefault();
@@ -1865,10 +1902,20 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         inputArea.classList.remove('drag-over');
         const files = e.dataTransfer && e.dataTransfer.files;
         if (!files || files.length === 0) return;
+        let remainingSlots = Math.max(0, MAX_ATTACHMENTS - pendingAttachments.length);
+        let skippedExcess = false;
         for (const file of files) {
           if (file.type && file.type.startsWith('image/')) {
+            if (remainingSlots <= 0) {
+              skippedExcess = true;
+              continue;
+            }
+            remainingSlots--;
             readImageFile(file, 'dropped-image.png');
           }
+        }
+        if (skippedExcess) {
+          addMessageDOM('error', 'Maximum of ' + MAX_ATTACHMENTS + ' attachments per prompt.');
         }
       });
     }
@@ -1892,6 +1939,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       queuedPrompts.push({ text, attachments });
       promptInput.value = '';
       pendingAttachments = [];
+      syncPendingAttachmentCount();
       saveState();
       renderQueuedPrompts();
       renderAttachmentsStrip();
@@ -1918,6 +1966,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
       promptInput.value = '';
       pendingAttachments = [];
+      syncPendingAttachmentCount();
       saveState();
       renderAttachmentsStrip();
       updateQueueControls();
@@ -2748,6 +2797,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       sessionState = null;
       queuedPrompts = [];
       pendingAttachments = [];
+      syncPendingAttachmentCount();
       promptCapabilities = { image: false, embeddedContext: false, audio: false };
       if (promptInput) {
         promptInput.value = '';
@@ -2873,6 +2923,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           sessionState = null;
           queuedPrompts = [];
           pendingAttachments = [];
+          syncPendingAttachmentCount();
           if (promptInput) {
             promptInput.value = '';
             promptInput.disabled = !hasActiveSession;
@@ -3222,6 +3273,14 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     if (!this.view || uris.length === 0) {
       return;
     }
+    const remainingSlots = Math.max(0, MAX_ATTACHMENTS - this.pendingAttachmentCount);
+    if (remainingSlots === 0) {
+      void vscode.window.showWarningMessage(
+        `Maximum of ${MAX_ATTACHMENTS} attachments allowed per message.`,
+      );
+      return;
+    }
+
     const activeId = this.sessionManager.getActiveSessionId();
     const session = activeId ? this.sessionManager.getSession(activeId) : null;
     const caps = this.sessionManager.getPromptCapabilities(session);
@@ -3229,8 +3288,14 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
     const MAX_TEXT_BYTES = 256 * 1024;
     const attachments: PromptAttachment[] = [];
+    let skippedExcess = 0;
 
-    for (const uri of uris) {
+    for (let i = 0; i < uris.length; i++) {
+      if (attachments.length >= remainingSlots) {
+        skippedExcess = uris.length - i;
+        break;
+      }
+      const uri = uris[i];
       const name = path.basename(uri.fsPath || uri.path) || uri.toString();
       const imageMime = getImageMimeType(uri.fsPath || uri.path);
       try {
@@ -3280,7 +3345,14 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       }
     }
 
+    if (skippedExcess > 0) {
+      void vscode.window.showWarningMessage(
+        `Maximum of ${MAX_ATTACHMENTS} attachments allowed per message; skipped ${skippedExcess} excess file(s).`,
+      );
+    }
+
     if (attachments.length > 0) {
+      this.pendingAttachmentCount += attachments.length;
       this.view.webview.postMessage({ type: 'attachmentsAdded', attachments });
       this.view.show?.(true);
     }
