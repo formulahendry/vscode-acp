@@ -1477,6 +1477,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       // banner / input area structure intact.
       chatHistory = [];
       saveState();
+      pendingUserEcho = null;
       currentAssistantEl = null;
       currentAssistantText = '';
       toolCalls = {};
@@ -2307,6 +2308,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           chatHistory = [];
           sessionState = null;
           saveState();
+          pendingUserEcho = null;
           currentAssistantEl = null;
           currentAssistantText = '';
           toolCalls = {};
