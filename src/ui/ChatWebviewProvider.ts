@@ -1221,6 +1221,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
     let hasActiveSession = false;
     let isProcessing = false;
+    // Prompt rendered by handleSend() that the agent may still echo back
+    // (some agents echo the live prompt as user_message_chunk).
+    let pendingUserEcho = null;
 
     // Modes / models state (legacy fallback path)
     let availableModes = [];
@@ -1417,6 +1420,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       if (!text || isProcessing) return;
 
       addMessage('user', text);
+      pendingUserEcho = text;
       promptInput.value = '';
       vscode.postMessage({ type: 'sendPrompt', text });
     }
@@ -1473,6 +1477,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       // banner / input area structure intact.
       chatHistory = [];
       saveState();
+      pendingUserEcho = null;
       currentAssistantEl = null;
       currentAssistantText = '';
       toolCalls = {};
@@ -2229,6 +2234,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       const msg = event.data;
       switch (msg.type) {
         case 'state':
+          // The active session may have changed; an echo that is still
+          // pending belongs to the previous one.
+          pendingUserEcho = null;
           if (msg.session) {
             showSessionConnected(msg.session);
           } else {
@@ -2252,6 +2260,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           break;
 
         case 'promptEnd':
+          pendingUserEcho = null;
           // Finalize thought block if present
           if (currentThoughtText) {
             finalizeThought();
@@ -2299,6 +2308,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           chatHistory = [];
           sessionState = null;
           saveState();
+          pendingUserEcho = null;
           currentAssistantEl = null;
           currentAssistantText = '';
           toolCalls = {};
@@ -2422,12 +2432,20 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         }
 
         case 'user_message_chunk': {
-          // Only the session/load replay path emits this; live prompts
-          // never echo the user's message. Use it to break apart historical
-          // turns: finalize any pending assistant turn first, then append
-          // the historical user message.
+          // Mostly emitted by the session/load replay path. Use it to break
+          // apart historical turns: finalize any pending assistant turn
+          // first, then append the historical user message.
           const content = update.content;
           if (content && content.type === 'text' && typeof content.text === 'string') {
+            // Some agents also echo the live prompt back. handleSend()
+            // already rendered it, so skip the echo instead of appending it
+            // to that message a second time. Only the first user chunk
+            // after sending is compared, so later ones are never dropped.
+            if (!isLoadingSession && pendingUserEcho !== null && content.text) {
+              const isEcho = content.text === pendingUserEcho;
+              pendingUserEcho = null;
+              if (isEcho) break;
+            }
             finalizeCurrentAssistantTurn();
             // Coalesce consecutive user chunks into one message.
             const last = chatHistory[chatHistory.length - 1];
